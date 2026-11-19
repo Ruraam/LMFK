@@ -3,6 +3,28 @@
 use lmfk_core::validate_json;
 use serde_json::{Value, json};
 
+const SCHEMA_JSON: &str = include_str!("../../../docs/en/06-inventory-schema.json");
+
+fn schema_validator() -> jsonschema::Validator {
+    let schema: Value = serde_json::from_str(SCHEMA_JSON).unwrap();
+    jsonschema::validator_for(&schema).unwrap()
+}
+
+fn assert_schema_valid(doc: &Value) {
+    let validator = schema_validator();
+    let errors: Vec<_> = validator.iter_errors(doc).collect();
+    assert!(errors.is_empty(), "unexpected schema errors: {errors:?}");
+}
+
+fn assert_schema_invalid(doc: &Value) {
+    let validator = schema_validator();
+    let errors: Vec<_> = validator.iter_errors(doc).collect();
+    assert!(
+        !errors.is_empty(),
+        "schema should have rejected the document"
+    );
+}
+
 fn valid_inventory() -> Value {
     json!({
         "schema_version": "1.0",
@@ -57,13 +79,16 @@ fn valid_inventory() -> Value {
 
 #[test]
 fn accepts_a_valid_inventory() {
-    assert!(validate_json(&valid_inventory()).is_ok());
+    let doc = valid_inventory();
+    assert_schema_valid(&doc);
+    assert!(validate_json(&doc).is_ok());
 }
 
 #[test]
 fn rejects_missing_required_field() {
     let mut doc = valid_inventory();
     doc.as_object_mut().unwrap().remove("schema_version");
+    assert_schema_invalid(&doc);
     let errors = validate_json(&doc).unwrap_err();
     assert!(errors.iter().any(|e| e.contains("schema_version")));
 }
@@ -72,6 +97,7 @@ fn rejects_missing_required_field() {
 fn rejects_wrong_types() {
     let mut doc = valid_inventory();
     doc["scan"]["read_only"] = json!("yes");
+    assert_schema_invalid(&doc);
     let errors = validate_json(&doc).unwrap_err();
     assert!(errors.iter().any(|e| e.contains("scan.read_only")));
 }
@@ -80,11 +106,13 @@ fn rejects_wrong_types() {
 fn rejects_unknown_enum_values() {
     let mut doc = valid_inventory();
     doc["host"]["secure_boot"] = json!("maybe");
+    assert_schema_invalid(&doc);
     let errors = validate_json(&doc).unwrap_err();
     assert!(errors.iter().any(|e| e.contains("host.secure_boot")));
 
     let mut doc = valid_inventory();
     doc["devices"][0]["driver"]["state"] = json!("installed");
+    assert_schema_invalid(&doc);
     let errors = validate_json(&doc).unwrap_err();
     assert!(errors.iter().any(|e| e.contains("driver.state")));
 }
@@ -97,6 +125,7 @@ fn rejects_class_id_instead_of_class_code() {
         .unwrap()
         .remove("code");
     doc["devices"][0]["class"]["id"] = json!("0x030000");
+    assert_schema_invalid(&doc);
     let errors = validate_json(&doc).unwrap_err();
     assert!(errors.iter().any(|e| e.contains("class.code")));
 }
@@ -105,6 +134,7 @@ fn rejects_class_id_instead_of_class_code() {
 fn rejects_empty_suggestions_without_package_unknown() {
     let mut doc = valid_inventory();
     doc["devices"][0]["diagnosis"] = json!([]);
+    assert_schema_invalid(&doc);
     let errors = validate_json(&doc).unwrap_err();
     assert!(errors.iter().any(|e| e.contains("PACKAGE_UNKNOWN")));
 }
@@ -113,17 +143,21 @@ fn rejects_empty_suggestions_without_package_unknown() {
 fn rejects_absolute_or_wrongly_prefixed_ids() {
     let mut doc = valid_inventory();
     doc["devices"][0]["id"] = json!("/sys/bus/pci/devices/0000:00:02.0");
+    assert_schema_invalid(&doc);
     let errors = validate_json(&doc).unwrap_err();
     assert!(errors.iter().any(|e| e.contains("absolute path")));
 
     let mut doc = valid_inventory();
     doc["devices"][0]["id"] = json!("usb:1-4");
+    assert_schema_invalid(&doc);
     let errors = validate_json(&doc).unwrap_err();
     assert!(errors.iter().any(|e| e.contains("must start with")));
 }
 
 #[test]
 fn rejects_inconsistent_summary() {
+    // Cross-field arithmetic cannot be expressed by JSON Schema; the manual
+    // contract validator covers it.
     let mut doc = valid_inventory();
     doc["summary"]["devices"] = json!(12);
     let errors = validate_json(&doc).unwrap_err();
@@ -132,6 +166,8 @@ fn rejects_inconsistent_summary() {
 
 #[test]
 fn rejects_interface_with_wrong_parent_reference() {
+    // JSON Schema cannot reference a sibling object's id; this relationship
+    // is checked by the manual contract validator.
     let mut doc = valid_inventory();
     doc["devices"][0]["bus"] = json!("usb");
     doc["devices"][0]["id"] = json!("usb:1-4");

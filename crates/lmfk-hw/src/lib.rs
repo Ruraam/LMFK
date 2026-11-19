@@ -164,6 +164,25 @@ fn classify_pci(code: &str) -> Category {
     }
 }
 
+fn parse_usb_class(
+    raw: Option<String>,
+    source: &Path,
+    errors: &mut Vec<ScanError>,
+) -> Option<String> {
+    let raw = raw?;
+    match parse_hex_id(Some(raw.clone()), 2) {
+        Some(value) => Some(value),
+        None => {
+            record_error(
+                errors,
+                source.display().to_string(),
+                format!("invalid USB class value: {raw}"),
+            );
+            None
+        }
+    }
+}
+
 fn classify_usb_interface(code: Option<String>) -> Category {
     let Some(code) = code else {
         return Category::Unknown;
@@ -302,16 +321,19 @@ fn scan_usb_interface(
         .next()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0);
-    let raw_class = read_required(dir, "bInterfaceClass", sources, errors);
-    let class_id = parse_hex_id(raw_class.clone(), 2).unwrap_or_default();
-    let category = classify_usb_interface(raw_class);
-    let modalias = clean_modalias(read_required(dir, "modalias", sources, errors), dir, errors);
+    // bInterfaceClass and modalias are legitimately absent on some USB
+    // interfaces. A present but malformed value is an error; a missing file
+    // is simply unknown.
+    let raw_class = read_optional(dir, "bInterfaceClass", sources, errors);
+    let class_id = parse_usb_class(raw_class, dir, errors);
+    let category = classify_usb_interface(class_id.clone());
+    let modalias = clean_modalias(read_optional(dir, "modalias", sources, errors), dir, errors);
     UsbInterface {
         id: format!("usb:{name}"),
         device_id: device_id.to_owned(),
         interface_number,
         class: ClassInfo {
-            code: class_id,
+            code: class_id.unwrap_or_default(),
             name: category.interface_label().to_owned(),
         },
         modalias,
@@ -359,8 +381,10 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         let id = format!("usb:{name}");
         let mut device = empty_device(id.clone(), Bus::Usb, &dir);
 
-        let raw_class = read_required(&dir, "bDeviceClass", sources, errors);
-        device.class.code = parse_hex_id(raw_class, 2).unwrap_or_default();
+        // bDeviceClass is 0x00 (unspecified) or absent on many devices; that
+        // is normal. Only an unreadable or malformed value is an error.
+        let raw_class = read_optional(&dir, "bDeviceClass", sources, errors);
+        device.class.code = parse_usb_class(raw_class, &dir, errors).unwrap_or_default();
         // The USB device itself is always classified as USB; a more specific
         // category is assigned to each interface using its interface class.
         device.class.name = Category::Usb.label().to_owned();
@@ -369,7 +393,7 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         device.device.id =
             parse_hex_id(read_required(&dir, "idProduct", sources, errors), 4).unwrap_or_default();
         device.modalias = clean_modalias(
-            read_required(&dir, "modalias", sources, errors),
+            read_optional(&dir, "modalias", sources, errors),
             &dir,
             errors,
         );

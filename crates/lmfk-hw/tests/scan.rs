@@ -10,6 +10,13 @@ use std::{
 use lmfk_core::{DriverState, Host, SCHEMA_VERSION, SecureBoot, validate_json};
 use lmfk_hw::{ScanOptions, scan};
 
+const SCHEMA_JSON: &str = include_str!("../../../docs/en/06-inventory-schema.json");
+
+fn schema_validator() -> jsonschema::Validator {
+    let schema: serde_json::Value = serde_json::from_str(SCHEMA_JSON).unwrap();
+    jsonschema::validator_for(&schema).unwrap()
+}
+
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 struct Fixture {
@@ -339,12 +346,84 @@ fn inaccessible_usb_interface_is_reported_as_unknown() {
 }
 
 #[test]
+fn usb_absent_optional_attributes_are_not_errors() {
+    let fixture = Fixture::new("usb-optional");
+    fs::create_dir_all(fixture.path("bus/pci/devices")).unwrap();
+    // No modalias and no bDeviceClass on the device; no bInterfaceClass and
+    // no modalias on the interface. All are legitimate on real USB hardware.
+    fixture.write("bus/usb/devices/3-1/idVendor", "0x046d\n");
+    fixture.write("bus/usb/devices/3-1/idProduct", "0x0825\n");
+    fixture.symlink(
+        "bus/usb/devices/3-1/3-1:1.0/driver",
+        "../../../../../drivers/usbhid",
+    );
+    // Create the interface directory itself by writing a harmless file.
+    fixture.write("bus/usb/devices/3-1/3-1:1.0/.keep", "");
+
+    let inventory = scan_fixture(&fixture);
+    assert!(
+        inventory.scan.errors.is_empty(),
+        "{:?}",
+        inventory.scan.errors
+    );
+    let device = &inventory.devices[0];
+    assert_eq!(device.modalias, "");
+    assert_eq!(device.class.code, "");
+    assert_eq!(device.class.name, "USB device");
+    assert_eq!(device.interfaces.len(), 1);
+    let interface = &device.interfaces[0];
+    assert_eq!(interface.modalias, "");
+    assert_eq!(interface.class.code, "");
+    assert_eq!(interface.class.name, "Unknown interface");
+    assert_eq!(device.diagnosis.len(), 1);
+    assert_eq!(device.diagnosis[0].code, "PACKAGE_UNKNOWN");
+    assert!(validate_json(&serde_json::to_value(inventory).unwrap()).is_ok());
+}
+
+#[test]
+fn usb_present_but_invalid_attributes_are_errors() {
+    let fixture = Fixture::new("usb-invalid");
+    fixture.write("bus/usb/devices/4-1/idVendor", "0x046d\n");
+    fixture.write("bus/usb/devices/4-1/idProduct", "0x0825\n");
+    fixture.write("bus/usb/devices/4-1/bDeviceClass", "not-hex\n");
+    fixture.write("bus/usb/devices/4-1/modalias", "garbage\n");
+    fixture.write("bus/usb/devices/4-1/4-1:1.0/bInterfaceClass", "0xZZ\n");
+    fixture.write("bus/usb/devices/4-1/4-1:1.0/modalias", "bad\n");
+
+    let inventory = scan_fixture(&fixture);
+    let messages: Vec<&str> = inventory
+        .scan
+        .errors
+        .iter()
+        .map(|error| error.message.as_str())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("invalid USB class value"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("invalid or empty modalias"))
+    );
+    assert_eq!(inventory.devices[0].class.code, "");
+    assert_eq!(inventory.devices[0].interfaces[0].class.code, "");
+}
+
+#[test]
 fn json_matches_schema_v1() {
     let fixture = build_full_fixture();
     let inventory = scan_fixture(&fixture);
     let json = inventory.to_json().unwrap();
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
 
+    let validator = schema_validator();
+    let schema_errors: Vec<_> = validator.iter_errors(&value).collect();
+    assert!(
+        schema_errors.is_empty(),
+        "JSON Schema v1.0 violations: {schema_errors:?}"
+    );
     let violations = validate_json(&value);
     assert!(
         violations.is_ok(),

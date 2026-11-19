@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lmfk.dev/schema/inventory-v1.0.json",
+  "title": "LMFK Hardware Inventory v1.0",
+  "description": "Machine-readable counterpart of docs/en/06-inventory-schema.md. Unknown fields are accepted for forward compatibility.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "generated_at", "host", "scan", "devices", "summary"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "host": { "$ref": "#/$defs/host" },
+    "scan": { "$ref": "#/$defs/scan" },
+    "devices": { "type": "array", "items": { "$ref": "#/$defs/device" } },
+    "summary": { "$ref": "#/$defs/summary" }
+  },
+  "$defs": {
+    "host": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "kernel_release",
+        "kernel_version",
+        "arch",
+        "distro_id",
+        "distro_version",
+        "secure_boot"
+      ],
+      "properties": {
+        "kernel_release": { "type": "string" },
+        "kernel_version": { "type": "string" },
+        "arch": { "type": "string" },
+        "distro_id": { "type": "string" },
+        "distro_version": { "type": "string" },
+        "secure_boot": { "enum": ["enabled", "disabled", "unknown"] }
+      }
+    },
+    "scan": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["sources", "read_only", "errors"],
+      "properties": {
+        "sources": { "type": "array", "items": { "type": "string" } },
+        "read_only": { "const": true },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["source", "message"],
+            "properties": {
+              "source": { "type": "string" },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "idName": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "classInfo": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["code", "name"],
+      "properties": {
+        "code": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "subsystem": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["vendor", "device"],
+      "properties": {
+        "vendor": { "type": "string" },
+        "device": { "type": "string" }
+      }
+    },
+    "driver": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["bound", "state"],
+      "properties": {
+        "bound": { "type": ["string", "null"] },
+        "state": { "enum": ["bound", "unbound", "unknown"] }
+      }
+    },
+    "usbInterface": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "device_id",
+        "interface_number",
+        "class",
+        "modalias",
+        "driver"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^usb:" },
+        "device_id": { "type": "string", "pattern": "^usb:" },
+        "interface_number": { "type": "integer", "minimum": 0 },
+        "class": { "$ref": "#/$defs/classInfo" },
+        "modalias": { "type": "string" },
+        "driver": { "$ref": "#/$defs/driver" }
+      }
+    },
+    "firmware": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["alias", "present", "paths"],
+      "properties": {
+        "alias": { "type": "string" },
+        "present": { "type": "boolean" },
+        "paths": { "type": "array", "items": { "type": "string" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "present": { "const": false } } },
+          "then": { "properties": { "paths": { "maxItems": 0 } } }
+        }
+      ]
+    },
+    "module": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "match_source", "state", "dependencies", "firmwares"],
+      "properties": {
+        "name": { "type": "string" },
+        "match_source": {
+          "enum": ["modules.alias", "modules.builtin", "driver_link", "modalias"]
+        },
+        "state": {
+          "enum": ["loaded", "available", "builtin", "missing", "unknown"]
+        },
+        "dependencies": { "type": "array", "items": { "type": "string" } },
+        "firmwares": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/firmware" }
+        }
+      }
+    },
+    "suggestion": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["backend", "package", "reason", "confidence"],
+      "properties": {
+        "backend": { "type": "string" },
+        "package": { "type": "string" },
+        "reason": { "type": "string" },
+        "confidence": { "enum": ["high", "medium", "low"] }
+      }
+    },
+    "diagnosis": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "code",
+        "title",
+        "explanation",
+        "severity",
+        "evidence",
+        "advised_action",
+        "message"
+      ],
+      "properties": {
+        "code": { "type": "string" },
+        "title": { "type": "string" },
+        "explanation": { "type": "string" },
+        "severity": { "enum": ["error", "warning", "info"] },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "advised_action": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "bus",
+        "class",
+        "vendor",
+        "device",
+        "subsystem",
+        "modalias",
+        "path",
+        "parent",
+        "interfaces",
+        "driver",
+        "modules",
+        "firmwares",
+        "package_suggestions",
+        "diagnosis"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "bus": { "enum": ["pci", "usb", "dt"] },
+        "class": { "$ref": "#/$defs/classInfo" },
+        "vendor": { "$ref": "#/$defs/idName" },
+        "device": { "$ref": "#/$defs/idName" },
+        "subsystem": { "$ref": "#/$defs/subsystem" },
+        "modalias": { "type": "string" },
+        "path": { "type": "string" },
+        "parent": { "type": ["string", "null"] },
+        "interfaces": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/usbInterface" }
+        },
+        "driver": { "$ref": "#/$defs/driver" },
+        "modules": { "type": "array", "items": { "$ref": "#/$defs/module" } },
+        "firmwares": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/firmware" }
+        },
+        "package_suggestions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/suggestion" }
+        },
+        "diagnosis": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diagnosis" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "bus": { "const": "pci" } } },
+          "then": { "properties": { "id": { "pattern": "^pci:" } } }
+        },
+        {
+          "if": { "properties": { "bus": { "const": "usb" } } },
+          "then": { "properties": { "id": { "pattern": "^usb:" } } }
+        },
+        {
+          "if": { "properties": { "bus": { "const": "dt" } } },
+          "then": { "properties": { "id": { "pattern": "^dt:" } } }
+        },
+        {
+          "if": {
+            "required": ["package_suggestions"],
+            "properties": { "package_suggestions": { "maxItems": 0 } }
+          },
+          "then": {
+            "required": ["diagnosis"],
+            "properties": {
+              "diagnosis": {
+                "contains": {
+                  "type": "object",
+                  "required": ["code"],
+                  "properties": { "code": { "const": "PACKAGE_UNKNOWN" } }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "devices",
+        "with_driver",
+        "without_driver",
+        "missing_firmware",
+        "errors"
+      ],
+      "properties": {
+        "devices": { "type": "integer", "minimum": 0 },
+        "with_driver": { "type": "integer", "minimum": 0 },
+        "without_driver": { "type": "integer", "minimum": 0 },
+        "missing_firmware": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

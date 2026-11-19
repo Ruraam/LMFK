@@ -12,3 +12,4 @@ lmfk-core = { path = "../lmfk-core" }
 
 [dev-dependencies]
 serde_json = "1"
+jsonschema = "0.29"
