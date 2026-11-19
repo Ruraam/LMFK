@@ -1,4 +1,4 @@
-//! Manifeste typé d'un paquet `.drv`, décodé depuis un map CBOR.
+//! Typed manifest of a `.drv` package, decoded from a CBOR map.
 
 use alloc::vec::Vec;
 use core::convert::TryFrom;
@@ -43,6 +43,9 @@ pub struct Manifest<'a> {
     pub mode: DriverMode,
     pub entry: &'a str,
     pub license: Option<&'a str>,
+    /// Monotonic security policy level. Required by the verifier; an old
+    /// package without it (or with a lower value) is an attempted downgrade.
+    pub security_policy: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,7 +69,7 @@ impl From<CborError> for Error {
 }
 
 /* ------------------------------------------------------------------------- */
-/* Accès aux champs                                                           */
+/* Field access                                                               */
 /* ------------------------------------------------------------------------- */
 
 fn field<'m, 'd>(
@@ -94,6 +97,13 @@ fn optional_field<'m, 'd>(
 fn uint(v: &Value<'_>, field: &'static str) -> Result<u32, Error> {
     match v {
         Value::Uint(n) => u32::try_from(*n).map_err(|_| Error::WrongType(field)),
+        _ => Err(Error::WrongType(field)),
+    }
+}
+
+fn uint64(v: &Value<'_>, field: &'static str) -> Result<u64, Error> {
+    match v {
+        Value::Uint(n) => Ok(*n),
         _ => Err(Error::WrongType(field)),
     }
 }
@@ -141,7 +151,7 @@ fn bounded_text<'d>(v: &Value<'d>, field: &'static str, max: usize) -> Result<&'
 }
 
 /* ------------------------------------------------------------------------- */
-/* Décodage                                                                    */
+/* Decoding                                                                    */
 /* ------------------------------------------------------------------------- */
 
 pub fn decode(data: &[u8]) -> Result<Manifest<'_>, Error> {
@@ -262,5 +272,8 @@ pub fn decode(data: &[u8]) -> Result<Manifest<'_>, Error> {
         mode,
         entry,
         license,
+        security_policy: optional_field(root, "security_policy")
+            .map(|v| uint64(v, "security_policy"))
+            .transpose()?,
     })
 }

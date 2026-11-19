@@ -1,11 +1,11 @@
 use core::fmt;
 
-/// Jeton opaque representant une ressource du framework (memoire, device,
-/// evenement, canal IPC, ...).
+/// Opaque token representing a framework resource (memory, device,
+/// event, IPC channel, ...).
 ///
-/// Ce n'est **jamais** un pointeur : la valeur n'a aucune signification
-/// hors du framework qui l'a emise, est stable quelle que soit l'architecture
-/// (toujours 64 bits) et 0 est reserve pour « invalide ».
+/// This is **never** a pointer: the value has no meaning outside the
+/// framework that issued it, is stable regardless of the architecture
+/// (always 64 bits), and 0 is reserved for "invalid".
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Handle(u64);
@@ -21,17 +21,17 @@ impl Handle {
         self.0 != 0
     }
 
-    /// Valeur brute, utile pour le debogage ou le protocole IPC interne.
-    /// Ne pas la reinterpretter comme une adresse.
+    /// Raw value, useful for debugging or the internal IPC protocol.
+    /// Do not reinterpret it as an address.
     pub const fn as_u64(self) -> u64 {
         self.0
     }
 
-    /// Construit un handle a partir d'une valeur brute.
+    /// Constructs a handle from a raw value.
     ///
     /// # Safety
-    /// La valeur doit avoir ete emise par le framework pour ce contexte.
-    /// Fabriquer un handle arbitraire est une violation du contrat ABI.
+    /// The value must have been issued by the framework for this context.
+    /// Fabricating an arbitrary handle is a violation of the ABI contract.
     pub const unsafe fn from_raw_unchecked(value: u64) -> Self {
         Self(value)
     }

@@ -1,0 +1,13 @@
+[package]
+name = "drvinfo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Inspect the contents of an LMFK .drv package"
+
+[dependencies]
+lmfk-drv-format = { path = "../../crates/lmfk-drv-format" }
+lmfk-drv-parser = { path = "../../crates/lmfk-drv-parser" }
+lmfk-drv-crypto = { path = "../../crates/lmfk-drv-crypto" }

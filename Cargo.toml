@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/lmfk-abi", "crates/lmfk-drv-format", "crates/lmfk-drv-parser"]
+members = [
+    "crates/lmfk-abi",
+    "crates/lmfk-drv-format",
+    "crates/lmfk-drv-parser",
+    "crates/lmfk-drv-crypto",
+    "tools/drvinfo",
+    "tools/drvverify",
+    "tools/drvpack",
+]
 
 [workspace.package]
 version = "0.1.0"

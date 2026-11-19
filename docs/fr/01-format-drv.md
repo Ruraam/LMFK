@@ -2,7 +2,7 @@
 
 *Spécification binaire. Ce document définit le conteneur, le manifeste et la zone de signature. La vérification cryptographique est implémentée dans une phase ultérieure ; le format, lui, est dès maintenant figé.*
 
-Tous les champs numériques du conteneur sont **little-endian**. Le CBOR du manifeste est **big-endian** (norme CBOR) et doit utiliser un encodage déterministe (longueurs minimales, longueurs définitives uniquement).
+Tous les champs numériques du conteneur sont **little-endian**. Le CBOR du manifeste est **big-endian** (norme CBOR) et doit utiliser un encodage déterministe (longueurs minimales, longueurs définitives uniquement, ordre canonique des clés de map — voir §2).
 
 ## 1. Conteneur
 
@@ -48,15 +48,29 @@ Les sections `BSS` déclarent une taille mais **n'occupent aucun octet** dans le
 
 Noms réservés v1 : `.text`, `.rodata`, `.data`, `.bss`, `.reloc`, `.resources`. Au moins une section `TEXT` est obligatoire ; les noms doivent être uniques.
 
+**Validation des flags de section.** Pour chaque type de section, le parser applique un masque *autorisé* (allowed) et un masque *requis* (required). Une section est rejetée comme `ParseError::InvalidSectionFlags` si elle pose un bit hors du masque autorisé ou si elle n'y pose pas tous les bits requis — les bits de flags inconnus ou interdits sont donc rejetés.
+
+| Type | Flags autorisés | Flags requis |
+|---|---|---|
+| TEXT | `ALLOC \| EXEC` | `ALLOC \| EXEC` (pas de `WRITE`) |
+| RODATA | `ALLOC` | `ALLOC` (pas de `WRITE`/`EXEC`) |
+| DATA | `ALLOC \| WRITE` | `ALLOC \| WRITE` |
+| BSS | `ALLOC \| WRITE` | `ALLOC \| WRITE` (aucun contenu dans le fichier) |
+| RELOC | aucun | flags doivent valoir `0` |
+| RESOURCE | aucun | flags doivent valoir `0` |
+
 ### 1.3 Invariants vérifiés par le parser
 
-- `total_size == taille réelle du fichier` (ni troncature, ni données superflues).
+- `total_size == taille réelle du fichier` (ni troncature, ni données superflues). **Aucune donnée ne peut suivre la zone de signature.**
+- Pour un paquet signé, la zone de signature doit terminer le fichier : `signature_offset + signature_length == total_size`. Toute autre disposition est rejetée comme `ParseError::SignatureNotAtEnd`.
+- `total_size` est toujours égal à la longueur réelle du fichier.
 - Tous les offsets et tailles sont calculés avec arithmétique vérifiée (pas de débordement).
 - La table des sections, chaque section non-BSS, le manifeste et la signature sont **contenus dans le fichier** et **ne se chevauchent pas mutuellement**.
 - `format_version`, `header_size`, les champs réservés et les bits de flags inconnus sont strictement validés.
 - Le masque d'architecture de l'en-tête doit correspondre exactement à l'union des architectures du manifeste.
 - `abi_min`/`abi_max` de l'en-tête doivent correspondre à ceux du manifeste.
 - Une zone de signature non vide exige le bit `SIGNED`, et réciproquement.
+- **L'analyse structurelle reste exempte de toute vérification cryptographique** : le parser valide le conteneur, la table des sections et le manifeste, et expose la signature comme octets opacifiés. Il ne vérifie jamais les empreintes SHA-256 ni la signature Ed25519 (voir §4).
 
 ### 1.4 Flags du paquet
 
@@ -91,6 +105,8 @@ Entrée de `deps` : `{ "name": text, "min": text?, "max": text? }`.
 
 Le décodeur impose : profondeur ≤ 16, ≤ 8192 items, longueurs CBOR déterministes, UTF-8 valide, aucune longueur indéfinie, aucune donnée après la valeur racine.
 
+**Profil déterministe — ordre canonique des clés de map.** Au-delà des longueurs minimales et définitives, l'encodage déterministe fixe désormais aussi l'**ordre des clés de map** : une clé est ordonnée selon ses octets *encodés*, avec la **clé encodée la plus courte en premier, puis l'ordre lexicographique octet par octet** en cas d'égalité de longueur. L'encodeur trie les clés de chaque map selon cet ordre ; le décodeur rejette tout autre ordre avec `NonCanonicalOrder`. Les doublons de clés restent rejetés (`DuplicateKey`). Cet ordre s'applique à toutes les maps CBOR, y compris le manifeste, les entrées `devices`/`deps` et le blob de signature.
+
 ## 3. Signature
 
 La zone de signature est un blob CBOR :
@@ -99,7 +115,7 @@ La zone de signature est un blob CBOR :
 { "alg": "ed25519", "key_id": bytes(32), "signature": bytes(64) }
 ```
 
-L'empreinte signée porte sur **tous les octets du fichier situés avant `signature_offset`**, y compris l'en-tête (dont `signature_length` est connu). Le parser expose cette zone comme octets bruts ; `drvverify` effectue la vérification avant toute installation ou exécution. En développement, `signature_length = 0` est autorisé ; en production, le bit `SIGNED` est obligatoire.
+L'empreinte signée porte sur **tous les octets du fichier situés avant `signature_offset`**, y compris l'en-tête (dont `signature_length` est connu). La zone de signature doit être la **dernière région du fichier** : `signature_offset + signature_length == total_size`, et aucune donnée ne peut la suivre. Un paquet signé dont la signature ne termine pas le fichier est rejeté comme `ParseError::SignatureNotAtEnd` ; `total_size` est toujours égal à la longueur réelle du fichier. Le parser expose cette zone comme octets bruts ; `drvverify` effectue la vérification avant toute installation ou exécution. En développement, `signature_length = 0` est autorisé ; en production, le bit `SIGNED` est obligatoire.
 
 ## 4. Séparation des préoccupations
 
@@ -108,3 +124,5 @@ conteneur (format)  →  manifeste (CBOR typé)  →  signature (blob opacifié)
 ```
 
 Chaque élément peut évoluer indépendamment : le numéro de version du format couvre le conteneur, les clés inconnues du manifeste sont ignorées, l'algorithme de signature est déclaré dans le blob, et le code reste un simple contenu de sections.
+
+**L'analyse structurelle n'est pas une vérification cryptographique.** `lmfk-drv-parser` ne contrôle que les invariants structurels (bornes, offsets, chevauchements, masques de flags, cohérence manifeste/en-tête) ; il ne vérifie **pas** les empreintes SHA-256 des sections ni la signature Ed25519. L'intégrité et l'authenticité constituent une étape distincte, réalisée par `lmfk-drv-crypto` / `drvverify`. Un paquet structurellement valide n'est donc jamais automatiquement approuvé — voir la règle de vérification en trois étapes dans `README-fr.md`.

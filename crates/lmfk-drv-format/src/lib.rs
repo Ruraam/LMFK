@@ -1,10 +1,10 @@
 #![no_std]
 
-//! Définitions binaires du paquet `.drv` v1.
+//! Binary definitions of the `.drv` v1 package.
 //!
-//! Le conteneur est little-endian ; le manifeste CBOR est big-endian et
-//! déterministe. Ce crate ne valide pas les relations entre régions : c'est
-//! le rôle de `lmfk-drv-parser`.
+//! The container is little-endian; the CBOR manifest is big-endian and
+//! deterministic. This crate does not validate relationships between regions:
+//! that is the role of `lmfk-drv-parser`.
 
 extern crate alloc;
 
@@ -16,7 +16,7 @@ pub use manifest::{Dependency, DeviceMatch, DriverMode, Manifest};
 use core::convert::TryFrom;
 
 /* ------------------------------------------------------------------------- */
-/* Constantes du conteneur                                                    */
+/* Container constants                                                        */
 /* ------------------------------------------------------------------------- */
 
 pub const DRV_MAGIC: &[u8; 8] = b"LMFKDRV\0";
@@ -49,13 +49,13 @@ pub const PKG_F_RELOCATABLE: u32 = 4;
 pub const PKG_F_KNOWN: u32 = PKG_F_SIGNED | PKG_F_COMPRESSED | PKG_F_RELOCATABLE;
 
 /* ------------------------------------------------------------------------- */
-/* Lecture/écriture little-endian                                            */
+/* Little-endian read/write                                                  */
 /* ------------------------------------------------------------------------- */
 
 pub mod le {
     use core::convert::TryInto;
 
-    /// Lit un u16 à l'offset 0 du slice. Le slice doit contenir 2 octets.
+    /// Reads a u16 at offset 0 of the slice. The slice must contain 2 bytes.
     pub fn u16le(bytes: &[u8]) -> u16 {
         u16::from_le_bytes(bytes[..2].try_into().unwrap())
     }
@@ -82,7 +82,7 @@ pub mod le {
 }
 
 /* ------------------------------------------------------------------------- */
-/* En-tête                                                                    */
+/* Header                                                                     */
 /* ------------------------------------------------------------------------- */
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,7 +111,7 @@ pub struct Header {
 }
 
 impl Header {
-    /// Décode l'en-tête et valide les champs autosuffisants.
+    /// Decodes the header and validates the self-contained fields.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, HeaderError> {
         if bytes.len() < HEADER_SIZE {
             return Err(HeaderError::TooShort);
@@ -150,7 +150,7 @@ impl Header {
         })
     }
 
-    /// Écrit un en-tête dans un buffer de 96 octets.
+    /// Writes a header into a 96-byte buffer.
     pub fn to_bytes(&self, out: &mut [u8]) {
         debug_assert!(out.len() >= HEADER_SIZE);
         out[..HEADER_SIZE].fill(0);
@@ -172,7 +172,7 @@ impl Header {
 }
 
 /* ------------------------------------------------------------------------- */
-/* Entrée de la table des sections                                           */
+/* Section table entry                                                       */
 /* ------------------------------------------------------------------------- */
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -183,7 +183,7 @@ pub enum SectionError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SectionHeader<'a> {
-    /// Nom sans le NUL de padding.
+    /// Name without the padding NUL.
     pub name: &'a [u8],
     pub ty: u32,
     pub flags: u32,
@@ -230,7 +230,7 @@ impl<'a> SectionHeader<'a> {
     }
 }
 
-/// Convertit un code d'architecture en bit de masque.
+/// Converts an architecture code into a mask bit.
 pub const fn arch_bit(code: u32) -> Option<u32> {
     if code == 0 || code > ARCH_COUNT {
         None
@@ -239,7 +239,7 @@ pub const fn arch_bit(code: u32) -> Option<u32> {
     }
 }
 
-/// Vérifie qu'une taille `u64` est representable en `usize` sur la cible.
+/// Checks that a `u64` size is representable as `usize` on the target.
 pub fn fits_usize(value: u64) -> bool {
     usize::try_from(value).is_ok()
 }

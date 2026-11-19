@@ -2,7 +2,7 @@ use core::mem::{offset_of, size_of};
 
 use crate::{DeviceDesc, Handle, Status, version::VersionRange};
 
-/* Alias de callbacks : Option<fn> = pointeur nullable de taille pointeur. */
+/* Callback aliases: Option<fn> = nullable pointer of pointer size. */
 
 pub type LogFn =
     Option<unsafe extern "C" fn(ctx: Handle, level: u32, msg: *const u8, len: u32) -> Status>;
@@ -44,11 +44,12 @@ pub type DeviceReadFn =
 pub type DeviceWriteFn =
     Option<unsafe extern "C" fn(dev: Handle, offset: u64, buf: *const u8, len: u32) -> Status>;
 
-/// Table de fonctions fournie par le framework au pilote.
+/// Function table provided by the framework to the driver.
 ///
-/// Ajouter une fonction = fin de la structure + bump mineur. Ne jamais
-/// reordonner : l'offset de chaque callback fait partie du contrat.
-#[repr(C, align(8))]
+/// Adding a function = end of the structure + minor bump. Never
+/// reorder: the offset of each callback is part of the contract.
+#[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]
+#[cfg_attr(target_pointer_width = "32", repr(C, align(4)))]
 pub struct DriverApi {
     pub size: u32,
     pub abi_version: u32,
@@ -86,23 +87,23 @@ impl DriverApi {
         }
     }
 
-    /// Verifie que la structure recue est assez grande pour lire un champ.
+    /// Checks that the received structure is large enough to read a field.
     pub const fn meets_min_size(&self, min_size: usize) -> bool {
         (self.size as usize) >= min_size
     }
 
-    /// Verifie qu'on peut lire en securite jusqu'au dernier champ v1.
+    /// Checks that it is safe to read up to the last v1 field.
     pub const fn meets_v1(&self) -> bool {
         self.meets_min_size(offset_of!(Self, device_write) + size_of::<DeviceWriteFn>())
     }
 
-    /// Verifie que la version du framework satisfait la plage du pilote.
+    /// Checks that the framework version satisfies the driver's range.
     pub const fn supports(&self, range: VersionRange) -> bool {
         self.meets_min_size(8) && range.accepts(self.abi_version)
     }
 }
 
-/* Vtable fournie par le pilote. */
+/* Vtable provided by the driver. */
 
 pub type InitFn = Option<
     unsafe extern "C" fn(
@@ -122,8 +123,9 @@ pub type StopFn = Option<unsafe extern "C" fn(dev: Handle) -> Status>;
 pub type RemoveFn = Option<unsafe extern "C" fn(dev: Handle) -> Status>;
 pub type ShutdownFn = Option<unsafe extern "C" fn(ctx: Handle)>;
 
-/// Table de fonctions fournie par le pilote au framework.
-#[repr(C, align(8))]
+/// Function table provided by the driver to the framework.
+#[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]
+#[cfg_attr(target_pointer_width = "32", repr(C, align(4)))]
 pub struct DriverEntry {
     pub size: u32,
     pub abi_version: u32,
@@ -162,7 +164,7 @@ impl DriverEntry {
     }
 }
 
-/// Signature du symbole exporte par chaque `.drv` (nom : `lmfk_driver_entry`).
+/// Signature of the symbol exported by each `.drv` (name: `lmfk_driver_entry`).
 pub type DriverEntryPoint = unsafe extern "C" fn(
     api: *const DriverApi,
     ctx: Handle,

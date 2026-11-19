@@ -1,0 +1,33 @@
+name: LMFK CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: i686-unknown-linux-gnu
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Tests (native)
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: 32-bit native ABI check (ILP32)
+        run: cargo check -p lmfk-abi --target i686-unknown-linux-gnu
+
+      - name: C header layout assertions
+        run: cc -std=c11 -Wall -Wextra -fsyntax-only -Iinclude tests/abi_layout.c

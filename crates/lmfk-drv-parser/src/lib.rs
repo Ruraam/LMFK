@@ -1,9 +1,9 @@
-//! Parser et validateur pour les paquets `.drv`.
+//! Parser and validator for `.drv` packages.
 //!
-//! Toute lecture est bornee et tous les calculs d'offsetsutilisent une
-//! arithmetique verifiee. Aucune section n'est executee ni evenement
-//! cryptographiquement verifiee ici : le parser garantit uniquement que le
-//! conteneur est coherent et securisable.
+//! All reads are bounded and all offset calculations use checked
+//! arithmetic. No section is executed and nothing is cryptographically
+//! verified here: the parser only guarantees that the container is
+//! consistent and securable.
 
 use core::convert::TryFrom;
 
@@ -34,6 +34,10 @@ pub enum ParseError {
     UnalignedOffset,
     InvalidAlignment,
     UnknownSectionType(u32),
+    InvalidSectionFlags {
+        ty: u32,
+        flags: u32,
+    },
     DuplicateSectionName,
     Overlap {
         first: &'static str,
@@ -42,6 +46,10 @@ pub enum ParseError {
     MissingTextSection,
     ManifestOutOfBounds,
     SignatureOutOfBounds,
+    SignatureNotAtEnd {
+        end: u64,
+        total: u64,
+    },
     SignatureFlagMismatch,
     AbiMismatch,
     ArchMaskMismatch,
@@ -63,11 +71,17 @@ impl core::fmt::Display for ParseError {
             Self::UnalignedOffset => f.write_str("unaligned section offset"),
             Self::InvalidAlignment => f.write_str("invalid section alignment"),
             Self::UnknownSectionType(t) => write!(f, "unknown section type: {t}"),
+            Self::InvalidSectionFlags { ty, flags } => {
+                write!(f, "invalid flags {flags:#x} for section type {ty}")
+            }
             Self::DuplicateSectionName => f.write_str("duplicate section name"),
             Self::Overlap { first, second } => write!(f, "overlap between {first} and {second}"),
             Self::MissingTextSection => f.write_str("no TEXT section"),
             Self::ManifestOutOfBounds => f.write_str("manifest out of bounds"),
             Self::SignatureOutOfBounds => f.write_str("signature out of bounds"),
+            Self::SignatureNotAtEnd { end, total } => {
+                write!(f, "signature ends at {end} but file is {total} bytes")
+            }
             Self::SignatureFlagMismatch => f.write_str("signature flag/length mismatch"),
             Self::AbiMismatch => f.write_str("header/manifest ABI mismatch"),
             Self::ArchMaskMismatch => f.write_str("header/manifest architecture mismatch"),
@@ -75,14 +89,14 @@ impl core::fmt::Display for ParseError {
     }
 }
 
-/// Vue sur une section du paquet. `data` est vide pour une section BSS.
+/// View of a section of the package. `data` is empty for a BSS section.
 #[derive(Clone, Copy, Debug)]
 pub struct Section<'a> {
     pub header: SectionHeader<'a>,
     pub data: &'a [u8],
 }
 
-/// Paquet `.drv` valide. Toutes les tranches pointent dans le buffer source.
+/// Valid `.drv` package. All slices point into the source buffer.
 #[derive(Clone, Debug)]
 pub struct DrvFile<'a> {
     data: &'a [u8],
@@ -109,12 +123,12 @@ impl<'a> DrvFile<'a> {
         self.sections.iter().find(|s| s.header.name == name)
     }
 
-    /// Octets bruts de la zone de signature (non vérifiés ici).
+    /// Raw bytes of the signature area (not verified here).
     pub fn signature(&self) -> &'a [u8] {
         self.signature
     }
 
-    /// Région couverte par la signature : tout ce qui précède la zone.
+    /// Region covered by the signature: everything before the area.
     pub fn signed_region(&self) -> &'a [u8] {
         if self.header.signature_length == 0 {
             self.data
@@ -130,7 +144,7 @@ impl<'a> DrvFile<'a> {
 }
 
 /* ------------------------------------------------------------------------- */
-/* Outils internes                                                            */
+/* Internal utilities                                                         */
 /* ------------------------------------------------------------------------- */
 
 fn is_aligned(value: u64, align: u64) -> bool {
@@ -176,11 +190,33 @@ fn known_section_type(ty: u32) -> bool {
     )
 }
 
+/// (allowed mask, required mask) for each section type.
+fn section_flags(ty: u32) -> (u32, u32) {
+    use lmfk_drv_format::{SECTION_F_ALLOC, SECTION_F_EXEC, SECTION_F_WRITE};
+    match ty {
+        SECTION_TYPE_TEXT => (
+            SECTION_F_ALLOC | SECTION_F_EXEC,
+            SECTION_F_ALLOC | SECTION_F_EXEC,
+        ),
+        SECTION_TYPE_RODATA => (SECTION_F_ALLOC, SECTION_F_ALLOC),
+        SECTION_TYPE_DATA => (
+            SECTION_F_ALLOC | SECTION_F_WRITE,
+            SECTION_F_ALLOC | SECTION_F_WRITE,
+        ),
+        SECTION_TYPE_BSS => (
+            SECTION_F_ALLOC | SECTION_F_WRITE,
+            SECTION_F_ALLOC | SECTION_F_WRITE,
+        ),
+        SECTION_TYPE_RELOC | SECTION_TYPE_RESOURCE => (0, 0),
+        _ => (0, 0),
+    }
+}
+
 /* ------------------------------------------------------------------------- */
-/* Parse principal                                                            */
+/* Main parse                                                                 */
 /* ------------------------------------------------------------------------- */
 
-/// Analyse et valide un paquet. Aucune copie des donnees n'est effectuee.
+/// Parses and validates a package. No data is copied.
 pub fn parse(data: &[u8]) -> Result<DrvFile<'_>, ParseError> {
     let header = Header::from_bytes(data).map_err(ParseError::Header)?;
 
@@ -212,7 +248,7 @@ pub fn parse(data: &[u8]) -> Result<DrvFile<'_>, ParseError> {
         kind: "header",
     }];
 
-    // Table des sections.
+    // Section table.
     let table_size = (header.section_count as u64)
         .checked_mul(SECTION_ENTRY_SIZE as u64)
         .ok_or(ParseError::TableOutOfBounds)?;
@@ -243,6 +279,13 @@ pub fn parse(data: &[u8]) -> Result<DrvFile<'_>, ParseError> {
         let sh = SectionHeader::from_bytes(entry).map_err(ParseError::Section)?;
         if !known_section_type(sh.ty) {
             return Err(ParseError::UnknownSectionType(sh.ty));
+        }
+        let (allowed, required) = section_flags(sh.ty);
+        if sh.flags & !allowed != 0 || sh.flags & required != required {
+            return Err(ParseError::InvalidSectionFlags {
+                ty: sh.ty,
+                flags: sh.flags,
+            });
         }
         if sh.align == 0 || !sh.align.is_power_of_two() {
             return Err(ParseError::InvalidAlignment);
@@ -283,7 +326,7 @@ pub fn parse(data: &[u8]) -> Result<DrvFile<'_>, ParseError> {
         return Err(ParseError::MissingTextSection);
     }
 
-    // Manifeste.
+    // Manifest.
     let manifest_end = header
         .manifest_offset
         .checked_add(header.manifest_length)
@@ -331,6 +374,15 @@ pub fn parse(data: &[u8]) -> Result<DrvFile<'_>, ParseError> {
     };
     if (header.flags & PKG_F_SIGNED != 0) != (header.signature_length != 0) {
         return Err(ParseError::SignatureFlagMismatch);
+    }
+    if header.signature_length != 0 {
+        let end = header
+            .signature_offset
+            .checked_add(header.signature_length)
+            .ok_or(ParseError::SignatureOutOfBounds)?;
+        if end != actual {
+            return Err(ParseError::SignatureNotAtEnd { end, total: actual });
+        }
     }
 
     check_overlaps(&mut regions)?;

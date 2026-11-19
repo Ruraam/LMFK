@@ -1,29 +1,55 @@
 /*
  * LMFK Driver ABI v1.0
  *
- * CONTRAT — Ce fichier definit la frontiere entre le noyau et les pilotes.
- * Il ne doit jamais exposer une structure interne du noyau, ni un pointeur
- * vers la memoire du noyau, ni un type dont la representation depend de
- * l'architecture (tout est uint32_t/uint64_t explicite).
+ * CONTRACT - This header defines the boundary between the kernel and drivers.
+ * It never exposes a kernel-internal structure or a pointer to kernel memory.
  *
- * REGLES DE VERSIONNAGE
- *   - Toute structure commence par uint32_t size (sizeof a l'ecriture).
- *     Un lecteur accepte size >= taille minimale connue et ignore la queue.
- *   - Les champs ne sont jamais reordonnnes ; ajout uniquement a la fin.
- *   - Les tables de fonctions ne sont jamais reordonnnees ; ajout a la fin,
- *     detecte via size. Une fonction absente est un pointeur NULL.
- *   - Versions : major << 16 | minor. Ajout = mineur, rupture = majeur.
- *     Le framework peut charger plusieurs ABI majeures simultanement.
- *   - Le pilote declare une PLAGE abi_min..abi_max (0xffff = tout minor).
+ * TWO BOUNDARIES
+ *   - Native ABI (lmfk_driver_api_t / lmfk_driver_entry_t): in-process
+ *     drivers sharing an address space with their framework. It contains
+ *     function pointers, so its size follows the target pointer width:
+ *       LP64  (x86_64, aarch64): api=96, entry=80, alignment 8.
+ *       ILP32 (armv7):          api=52, entry=44, alignment 4.
+ *   - IPC wire protocol (see crates/lmfk-abi/src/ipc.rs): isolated userspace
+ *     drivers. Pointer-free, little-endian, identical on every target.
  *
- * CONTRAINTES D'APPEL
- *   - Convention d'appel C, sans exception ni unwinding (panic = abort).
- *   - Les callbacks s'executent sur le thread/executor du pilote, jamais
- *     dans un contexte IRQ noyau arbitraire.
- *   - Les buffers pointes par les parametres appartiennent a l'appelant
- *     sauf indication contraire ; le pilote ne les conserve pas.
+ * Data-only structures (lmfk_device_desc_t, handles, status codes) have the
+ * same representation on every profile: explicit uint32_t/uint64_t only.
  *
- * Ce header est complete par des _Static_assert dans tests/abi_layout.c.
+ * VERSIONING RULES
+ *   - Every structure starts with uint32_t size (sizeof when writing).
+ *     A reader accepts size >= the smallest layout it knows and ignores the
+ *     tail.
+ *   - Fields are never reordered; additions go to the end only.
+ *   - Function tables are never reordered; additions go to the end and are
+ *     detected via size. A missing function is a NULL pointer.
+ *   - Versions are major << 16 | minor. Addition = minor, semantic break =
+ *     major. The framework may host several major shims simultaneously.
+ *   - A driver declares a RANGE abi_min..abi_max (0xffff = any minor).
+ *
+ * OWNERSHIP, LIFETIME AND VALIDATION
+ *   - Buffer pointers are borrowed for the duration of the call only. The
+ *     caller owns them and may reclaim them as soon as the call returns.
+ *     Lengths are explicit; no NUL-termination is assumed by either side.
+ *   - lmfk_handle_t is an opaque token owned by the framework, never an
+ *     address. Drivers borrow it; they must not fabricate, guess or retain
+ *     it across a framework restart. Using an invalid handle returns
+ *     LMFK_ERR_INVAL and must never trap.
+ *   - The framework validates handles and ranges using overflow-safe
+ *     arithmetic. Drivers must check every status and must not assume a
+ *     handle survives an error, a stop/remove, or a policy revocation.
+ *
+ * CONCURRENCY AND EXECUTION CONTEXT
+ *   - Callbacks may be entered on different threads; drivers synchronize
+ *     their own state. No callback is reentered for the same instance while
+ *     another callback of that instance is running.
+ *   - Callbacks run on the driver's executor, never in an arbitrary kernel
+ *     interrupt context. Interrupt delivery is the irq callback and
+ *     acknowledgement is explicit. No unwinding across the ABI (panic=abort).
+ *   - shutdown is the last callback for a context; afterwards every handle
+ *     issued to that context is invalid.
+ *
+ * Verified by _Static_assert in tests/abi_layout.c on LP64 and ILP32.
  */
 
 #ifndef LMFK_ABI_H
@@ -34,8 +60,14 @@
 
 #if defined(__GNUC__) || defined(__clang__)
 #define LMFK_ALIGNED8 __attribute__((aligned(8)))
+#if defined(__SIZEOF_POINTER__) && __SIZEOF_POINTER__ == 4
+#define LMFK_ALIGNED_PTR __attribute__((aligned(4)))
+#else
+#define LMFK_ALIGNED_PTR __attribute__((aligned(8)))
+#endif
 #else
 #define LMFK_ALIGNED8
+#define LMFK_ALIGNED_PTR
 #endif
 
 #ifdef __cplusplus
@@ -176,7 +208,7 @@ typedef struct lmfk_driver_api {
     lmfk_device_register_fn device_register; /* offset 72 */
     lmfk_device_read_fn   device_read;    /* offset 80 */
     lmfk_device_write_fn  device_write;   /* offset 88 */
-} LMFK_ALIGNED8 lmfk_driver_api_t; /* sizeof = 96, align = 8 */
+} LMFK_ALIGNED_PTR lmfk_driver_api_t; /* LP64: 96/8, ILP32: 52/4 */
 
 /* ------------------------------------------------------------------------- */
 /* Vtable fournie par le pilote au framework                                 */
@@ -207,7 +239,7 @@ typedef struct lmfk_driver_entry {
     lmfk_stop_fn     stop;     /* offset 56 */
     lmfk_remove_fn   remove;   /* offset 64 */
     lmfk_shutdown_fn shutdown; /* offset 72 */
-} LMFK_ALIGNED8 lmfk_driver_entry_t; /* sizeof = 80, align = 8 */
+} LMFK_ALIGNED_PTR lmfk_driver_entry_t; /* LP64: 80/8, ILP32: 44/4 */
 
 /* ------------------------------------------------------------------------- */
 /* Point d'entree exporte par chaque .drv                                    */

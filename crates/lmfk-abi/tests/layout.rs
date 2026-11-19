@@ -1,4 +1,7 @@
-use lmfk_abi::{ABI_V1, Bus, DEVICE_NAME_LEN, DeviceDesc, DriverApi, DriverEntry, Handle, Status};
+use lmfk_abi::{
+    ABI_V1, AbiProfile, Bus, DEVICE_NAME_LEN, DeviceDesc, DriverApi, DriverEntry, Handle,
+    IPC_HEADER_SIZE, IpcMessageHeader, Status, abi_profile, native_abi_size,
+};
 use std::mem::{align_of, offset_of, size_of};
 
 #[test]
@@ -9,7 +12,7 @@ fn scalar_abi_types_have_fixed_size() {
 }
 
 #[test]
-fn device_desc_layout_matches_c_header() {
+fn device_desc_layout_is_identical_on_all_profiles() {
     assert_eq!(DEVICE_NAME_LEN, 64);
     assert_eq!(size_of::<DeviceDesc>(), 96);
     assert_eq!(align_of::<DeviceDesc>(), 8);
@@ -20,32 +23,40 @@ fn device_desc_layout_matches_c_header() {
 }
 
 #[test]
-fn driver_api_layout_matches_c_header() {
-    assert_eq!(size_of::<DriverApi>(), 96);
-    assert_eq!(align_of::<DriverApi>(), 8);
-    assert_eq!(offset_of!(DriverApi, size), 0);
+fn vtable_layout_follows_pointer_width() {
+    let ptr = size_of::<usize>();
+    assert_eq!(size_of::<DriverApi>(), 8 + 11 * ptr);
     assert_eq!(offset_of!(DriverApi, abi_version), 4);
     assert_eq!(offset_of!(DriverApi, log), 8);
-    assert_eq!(offset_of!(DriverApi, mem_alloc), 16);
-    assert_eq!(offset_of!(DriverApi, mmio_map), 32);
-    assert_eq!(offset_of!(DriverApi, irq_register), 40);
-    assert_eq!(offset_of!(DriverApi, dma_alloc), 56);
-    assert_eq!(offset_of!(DriverApi, ipc_open), 64);
-    assert_eq!(offset_of!(DriverApi, device_register), 72);
-    assert_eq!(offset_of!(DriverApi, device_read), 80);
-    assert_eq!(offset_of!(DriverApi, device_write), 88);
+    assert_eq!(offset_of!(DriverApi, mmio_map), 8 + 3 * ptr);
+    assert_eq!(offset_of!(DriverApi, device_write), 8 + 10 * ptr);
+
+    assert_eq!(size_of::<DriverEntry>(), 8 + 9 * ptr);
+    assert_eq!(offset_of!(DriverEntry, init), 8);
+    assert_eq!(offset_of!(DriverEntry, probe), 8 + ptr);
+    assert_eq!(offset_of!(DriverEntry, shutdown), 8 + 8 * ptr);
+
+    match abi_profile() {
+        AbiProfile::Lp64 => {
+            assert_eq!(ptr, 8);
+            assert_eq!(native_abi_size(), (96, 80));
+            assert_eq!(align_of::<DriverApi>(), 8);
+            assert_eq!(align_of::<DriverEntry>(), 8);
+        }
+        AbiProfile::Ilp32 => {
+            assert_eq!(ptr, 4);
+            assert_eq!(native_abi_size(), (52, 44));
+            assert_eq!(align_of::<DriverApi>(), 4);
+            assert_eq!(align_of::<DriverEntry>(), 4);
+        }
+    }
 }
 
 #[test]
-fn driver_entry_layout_matches_c_header() {
-    assert_eq!(size_of::<DriverEntry>(), 80);
-    assert_eq!(align_of::<DriverEntry>(), 8);
-    assert_eq!(offset_of!(DriverEntry, size), 0);
-    assert_eq!(offset_of!(DriverEntry, init), 8);
-    assert_eq!(offset_of!(DriverEntry, probe), 16);
-    assert_eq!(offset_of!(DriverEntry, irq), 32);
-    assert_eq!(offset_of!(DriverEntry, stop), 56);
-    assert_eq!(offset_of!(DriverEntry, shutdown), 72);
+fn ipc_wire_layout_is_pointer_free() {
+    assert_eq!(IPC_HEADER_SIZE, 32);
+    assert_eq!(size_of::<IpcMessageHeader>(), IPC_HEADER_SIZE);
+    assert_eq!(align_of::<IpcMessageHeader>(), 8);
 }
 
 #[test]

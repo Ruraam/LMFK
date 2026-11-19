@@ -1,9 +1,9 @@
-//! Fixtures construites a la main et tests de fichiers malformes.
+//! Hand-built fixtures and malformed-file tests.
 
 use super::*;
 use lmfk_drv_format::{
     Header, MAX_SECTIONS, PKG_F_COMPRESSED, PKG_F_SIGNED, SECTION_ENTRY_SIZE, SECTION_F_ALLOC,
-    SECTION_F_EXEC, SECTION_TYPE_RODATA, SECTION_TYPE_TEXT, SectionHeader,
+    SECTION_F_EXEC, SECTION_F_WRITE, SECTION_TYPE_RODATA, SECTION_TYPE_TEXT, SectionHeader,
     cbor::{self, Value},
     le,
 };
@@ -50,10 +50,16 @@ fn build_with(names: &[&[u8]], manifest: &[u8]) -> Vec<u8> {
     let mut data = vec![0u8; total as usize];
     for (index, name) in names.iter().enumerate() {
         let off = payload_off + (index as u64) * (PAYLOAD_LEN as u64);
+        let flags = match *name {
+            b".text" => SECTION_F_ALLOC | SECTION_F_EXEC,
+            b".rodata" => SECTION_F_ALLOC,
+            b".data" | b".bss" => SECTION_F_ALLOC | SECTION_F_WRITE,
+            _ => 0,
+        };
         let sh = SectionHeader {
             name,
             ty: SECTION_TYPE_TEXT,
-            flags: SECTION_F_ALLOC | SECTION_F_EXEC,
+            flags,
             offset: off,
             size: PAYLOAD_LEN as u64,
             align: 8,
@@ -224,8 +230,7 @@ fn rejects_bad_section_table() {
     put64(&mut data, 48, total);
     assert_eq!(parse(&data).unwrap_err(), ParseError::TableOutOfBounds);
 
-    let mut data = data;
-    put64(&mut data, 48, 100); // non aligne sur 8
+    put64(&mut data, 48, 100); // not aligned on 8
     assert_eq!(parse(&data).unwrap_err(), ParseError::TableOutOfBounds);
 }
 
@@ -267,7 +272,7 @@ fn rejects_out_of_bounds_and_overflowing_payload() {
     assert_eq!(parse(&d).unwrap_err(), ParseError::SectionOutOfBounds);
 
     let mut d = data;
-    put64(&mut d, 96 + 24, u64::MAX & !7);
+    put64(&mut d, 96 + 24, u64::MAX - 7);
     assert_eq!(parse(&d).unwrap_err(), ParseError::SectionOutOfBounds);
 }
 
@@ -277,8 +282,13 @@ fn rejects_duplicate_section_names_and_overlaps() {
     assert_eq!(parse(&data).unwrap_err(), ParseError::DuplicateSectionName);
 
     let mut data = build(&[b".text", b".rodata"]);
-    // Deuxieme section placee sur la premiere.
-    put64(&mut data, 96 + SECTION_ENTRY_SIZE + 24, 176);
+    // With two sections the first payload starts at 96 + 2*80 = 256.
+    put32(
+        &mut data,
+        96 + SECTION_ENTRY_SIZE + 16,
+        lmfk_drv_format::SECTION_TYPE_RODATA,
+    );
+    put64(&mut data, 96 + SECTION_ENTRY_SIZE + 24, 256);
     assert!(matches!(
         parse(&data).unwrap_err(),
         ParseError::Overlap { .. }
@@ -289,6 +299,7 @@ fn rejects_duplicate_section_names_and_overlaps() {
 fn rejects_package_without_text_section() {
     let mut data = build(&[b".rodata"]);
     put32(&mut data, 96 + 16, SECTION_TYPE_RODATA);
+    put32(&mut data, 96 + 20, SECTION_F_ALLOC);
     assert_eq!(parse(&data).unwrap_err(), ParseError::MissingTextSection);
 }
 
@@ -307,7 +318,7 @@ fn rejects_bad_manifest_region() {
 
     let mut d = data;
     let (off, _) = manifest_range(&d);
-    put64(&mut d, 56, 176); // recouvre la section .text
+    put64(&mut d, 56, 176); // overlaps the .text section
     assert!(matches!(parse(&d).unwrap_err(), ParseError::Overlap { .. }));
     assert!(off > 176);
 }
@@ -322,7 +333,7 @@ fn rejects_bad_signature_region_and_flag() {
     assert_eq!(parse(&d).unwrap_err(), ParseError::SignatureOutOfBounds);
 
     let mut d = data;
-    put32(&mut d, 12, 0); // signature presente sans le flag
+    put32(&mut d, 12, 0); // signature present without the flag
     assert_eq!(parse(&d).unwrap_err(), ParseError::SignatureFlagMismatch);
 }
 
@@ -359,6 +370,69 @@ fn rejects_manifest_with_duplicate_key() {
     ]));
     let data = build_with(&[b".text"], &manifest);
     assert!(matches!(parse(&data).unwrap_err(), ParseError::Manifest(_)));
+}
+
+#[test]
+fn rejects_data_after_signature() {
+    let mut data = build(&[b".text"]);
+    let original_len = data.len();
+    data.extend_from_slice(&[0xaa; 8]);
+    let new_len = data.len() as u64;
+    put64(&mut data, 40, new_len);
+    assert!(matches!(
+        parse(&data).unwrap_err(),
+        ParseError::SignatureNotAtEnd { end, total }
+            if end == original_len as u64 && total == data.len() as u64
+    ));
+}
+
+#[test]
+fn rejects_invalid_section_flags() {
+    let data = build(&[b".text"]);
+
+    let mut missing = data.clone();
+    put32(&mut missing, 96 + 20, 0);
+    assert!(matches!(
+        parse(&missing).unwrap_err(),
+        ParseError::InvalidSectionFlags { .. }
+    ));
+
+    let mut extra = data;
+    put32(
+        &mut extra,
+        96 + 20,
+        SECTION_F_ALLOC | SECTION_F_EXEC | SECTION_F_WRITE,
+    );
+    assert!(matches!(
+        parse(&extra).unwrap_err(),
+        ParseError::InvalidSectionFlags { .. }
+    ));
+}
+
+#[test]
+fn rejects_every_truncation() {
+    let data = build(&[b".text"]);
+    for length in 0..data.len() {
+        assert!(
+            parse(&data[..length]).is_err(),
+            "truncation at {length} accepted"
+        );
+    }
+}
+
+#[test]
+fn deterministic_mutation_fuzz_does_not_panic() {
+    let original = build(&[b".text", b".rodata"]);
+    let mut state = 0x1234_5678_9abc_def0u64;
+    for _ in 0..2000 {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let mut data = original.clone();
+        let index = (state >> 33) as usize % data.len();
+        data[index] ^= (state >> 11) as u8 | 1;
+        let _ = parse(&data);
+    }
 }
 
 #[test]
@@ -414,18 +488,18 @@ fn rejects_manifest_schema_errors() {
         (Value::Text("entry"), Value::Text("lmfk_driver_entry")),
     ]));
     let data = build_with(&[b".text"], &inverted);
-    // Le header porte encore ABI_MIN/ABI_MAX : l'incoherence est detectee
-    // avant meme la validation du manifeste, ce qui est acceptable.
+    // The header still carries ABI_MIN/ABI_MAX: the inconsistency is detected
+    // even before manifest validation, which is acceptable.
     assert!(matches!(
         parse(&data).unwrap_err(),
         ParseError::AbiMismatch | ParseError::Manifest(ManifestError::InvalidAbiRange)
     ));
 
     let mut missing = base(Value::Bytes(&[0x55u8; 16]));
-    // Retire la derniere paire ("entry") du map CBOR.
+    // Remove the last pair ("entry") from the CBOR map.
     let decoded = cbor::decode(&missing).unwrap();
     if let Value::Map(mut entries) = decoded {
-        entries.pop();
+        entries.retain(|(key, _)| !matches!(key, Value::Text("entry")));
         missing = cbor::encode_vec(&Value::Map(entries));
     }
     let data = build_with(&[b".text"], &missing);

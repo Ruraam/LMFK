@@ -1,10 +1,10 @@
 use core::fmt;
 
-/// Code de retour stable. Les valeurs sont fixees par le contrat ABI et ne
-/// doivent jamais etre reutilisees pour un autre sens.
+/// Stable return code. The values are fixed by the ABI contract and must
+/// never be reused for another meaning.
 ///
-/// `repr(transparent)` sur `i32` garantit la representation C (`int32_t`)
-/// sans deposer sur une enum Rust dont les discriminants pourraient changer.
+/// `repr(transparent)` on `i32` guarantees the C representation (`int32_t`)
+/// without relying on a Rust enum whose discriminants could change.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Status(pub i32);
@@ -25,7 +25,7 @@ impl Status {
     pub const ERR_ALREADY: Self = Self(-12);
     pub const ERR_AGAIN: Self = Self(-13);
 
-    /// Construit un statut a partir d'une valeur recue de l'ABI.
+    /// Constructs a status from a value received from the ABI.
     pub const fn from_raw(code: i32) -> Self {
         Self(code)
     }

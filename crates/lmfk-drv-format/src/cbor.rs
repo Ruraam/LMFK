@@ -1,8 +1,8 @@
-//! Décodeur/encodeur CBOR minimal et strict pour les manifestes `.drv`.
+//! Minimal, strict CBOR decoder/encoder for `.drv` manifests.
 //!
-//! Sous-ensemble volontairement limite : longueurs definitives, encodage
-//! minimal, profondeur et nombre d'items bornes. Cela evite les ambiguites
-//! d'encodage et les attaques par imbrication sur un fichier non fiable.
+//! A deliberately limited subset: definite lengths, minimal encoding, and
+//! bounded depth and item count. This avoids encoding ambiguities and
+//! nesting attacks on an untrusted file.
 
 use alloc::vec::Vec;
 use core::convert::TryFrom;
@@ -14,7 +14,7 @@ const MAX_LEN: usize = 1024 * 1024;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value<'a> {
     Uint(u64),
-    /// Valeur negative : `-1 - n`.
+    /// Negative value: `-1 - n`.
     Nint(u64),
     Bytes(&'a [u8]),
     Text(&'a str),
@@ -38,6 +38,7 @@ pub enum Error {
     LengthTooLarge,
     TrailingData,
     DuplicateKey,
+    NonCanonicalOrder,
 }
 
 pub struct Decoder<'a> {
@@ -81,7 +82,7 @@ impl<'a> Decoder<'a> {
         Ok(slice)
     }
 
-    /// Décode l'argument d'une tête CBOR et exige sa forme minimale.
+    /// Decodes the argument of a CBOR head and requires its minimal form.
     fn arg(&mut self, ai: u8) -> Result<u64, Error> {
         match ai {
             0..=23 => Ok(u64::from(ai)),
@@ -161,11 +162,20 @@ impl<'a> Decoder<'a> {
                 let n = self.count(ai)?;
                 self.enter()?;
                 let mut out: Vec<(Value<'a>, Value<'a>)> = Vec::new();
+                let mut previous_key: Option<&[u8]> = None;
                 for _ in 0..n {
+                    let key_start = self.pos;
                     let key = self.value()?;
+                    let key_bytes = &self.data[key_start..self.pos];
                     if out.iter().any(|(k, _)| *k == key) {
                         return Err(Error::DuplicateKey);
                     }
+                    if let Some(previous) = previous_key {
+                        if canonical_cmp(previous, key_bytes) != core::cmp::Ordering::Less {
+                            return Err(Error::NonCanonicalOrder);
+                        }
+                    }
+                    previous_key = Some(key_bytes);
                     let val = self.value()?;
                     out.push((key, val));
                 }
@@ -198,8 +208,14 @@ pub fn decode(data: &[u8]) -> Result<Value<'_>, Error> {
 }
 
 /* ------------------------------------------------------------------------- */
-/* Encodage déterministe (utilisé par les fixtures et, plus tard, drvpack)    */
+/* Deterministic encoding (used by fixtures and, later, drvpack)              */
 /* ------------------------------------------------------------------------- */
+
+/// Deterministic map key order: shortest encoded key first, then bytewise.
+/// This is the order the encoder emits and the decoder requires.
+fn canonical_cmp(a: &[u8], b: &[u8]) -> core::cmp::Ordering {
+    (a.len(), a).cmp(&(b.len(), b))
+}
 
 fn write_head(out: &mut Vec<u8>, major: u8, arg: u64) {
     let m = major << 5;
@@ -239,9 +255,14 @@ pub fn encode(value: &Value<'_>, out: &mut Vec<u8>) {
             }
         }
         Value::Map(entries) => {
-            write_head(out, 5, entries.len() as u64);
-            for (key, val) in entries {
-                encode(key, out);
+            let mut ordered: Vec<(Vec<u8>, &Value<'_>)> = entries
+                .iter()
+                .map(|(key, val)| (encode_vec(key), val))
+                .collect();
+            ordered.sort_by(|a, b| canonical_cmp(&a.0, &b.0));
+            write_head(out, 5, ordered.len() as u64);
+            for (key, val) in ordered {
+                out.extend_from_slice(&key);
                 encode(val, out);
             }
         }
@@ -268,15 +289,16 @@ mod tests {
 
     #[test]
     fn roundtrip_scalars_and_containers() {
+        // Keys are listed in canonical order: shortest first, then bytewise.
         let value = Value::Map(vec![
-            (txt("name"), txt("intel-gpu")),
+            (txt("id"), Value::Bytes(&[1, 2, 3, 4])),
+            (txt("ok"), Value::Bool(true)),
             (Value::Text("abi"), Value::Uint(0x0001_0000)),
             (
                 txt("arch"),
                 Value::Array(vec![Value::Uint(1), Value::Uint(2)]),
             ),
-            (txt("id"), Value::Bytes(&[1, 2, 3, 4])),
-            (txt("ok"), Value::Bool(true)),
+            (txt("name"), txt("intel-gpu")),
             (txt("none"), Value::Null),
         ]);
         let bytes = encode_vec(&value);
@@ -285,13 +307,13 @@ mod tests {
 
     #[test]
     fn rejects_indefinite_length() {
-        // 0x9f = tableau de longueur indéfinie.
+        // 0x9f = indefinite-length array.
         assert_eq!(decode(&[0x9f, 0xff]).unwrap_err(), Error::IndefiniteLength);
     }
 
     #[test]
     fn rejects_non_minimal_integer() {
-        // 0x18 0x17 -> 23 doit être encodé 0x17.
+        // 0x18 0x17 -> 23 must be encoded as 0x17.
         assert_eq!(
             decode(&[0x18, 0x17]).unwrap_err(),
             Error::NonMinimalEncoding
@@ -322,5 +344,26 @@ mod tests {
             decode(&[0x1a, 0x00, 0x01]).unwrap_err(),
             Error::UnexpectedEof
         );
+    }
+
+    #[test]
+    fn rejects_non_canonical_map_order() {
+        // {"b": 1, "a": 2} - "a" must come before "b".
+        let bytes = [0xa2, 0x61, b'b', 0x01, 0x61, b'a', 0x02];
+        assert_eq!(decode(&bytes).unwrap_err(), Error::NonCanonicalOrder);
+    }
+
+    #[test]
+    fn encoder_emits_canonical_order() {
+        let value = Value::Map(vec![
+            (txt("a"), Value::Uint(2)),
+            (txt("bb"), Value::Uint(3)),
+            (txt("zz"), Value::Uint(1)),
+        ]);
+        let bytes = encode_vec(&value);
+        // Shortest key first: "a", then "bb" and "zz" in bytewise order.
+        assert_eq!(bytes[1], 0x61);
+        assert_eq!(bytes[2], b'a');
+        assert_eq!(decode(&bytes).unwrap(), value);
     }
 }
