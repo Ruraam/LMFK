@@ -1,3 +1,7 @@
+> **DOCUMENT HISTORIQUE / EXPÉRIMENTAL** — décrit l'ancien projet de noyau hybride / ABI stable. LMFK est désormais un gestionnaire de pilotes Linux pour les pilotes Linux EXISTANTS ; voir [docs/en/04-driver-manager-spec.md](../en/04-driver-manager-spec.md). Conservé pour référence, hors feuille de route actuelle.
+
+---
+
 # LMFK — Cahier des charges technique v0.1
 
 *Document de travail. Décisions déjà arbitrées selon la recommandation initiale : **noyau hybride**, base Linux conservée, Driver Framework indépendant, compatibilité Linux progressive.*

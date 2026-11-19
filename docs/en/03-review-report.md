@@ -1,6 +1,10 @@
+> **HISTORICAL / EXPERIMENTAL DOCUMENT** — describes the former hybrid-kernel/stable-ABI project. LMFK is now a Linux driver manager for EXISTING Linux drivers; see [docs/en/04-driver-manager-spec.md](04-driver-manager-spec.md). Preserved for reference, not the current roadmap.
+
+---
+
 # LMFK — Technical Review and Decisions
 
-*Review document for the current batch (ABI v1 contract, `.drv` container hardening and deterministic CBOR). This lot is **not committed**: it is submitted for review and authorization. No cryptographic phase work is resumed before that authorization.*
+*Review document for the former batch (ABI v1 contract, `.drv` container hardening and deterministic CBOR). This work is now **committed** and preserved as experimental/historical; it is kept for reference and is not the current roadmap.*
 
 Companion documents: `00-technical-spec.md`, `01-drv-format.md`, `02-abi-contract.md`.
 
@@ -56,9 +60,9 @@ Companion documents: `00-technical-spec.md`, `01-drv-format.md`, `02-abi-contrac
 - **ILP32 not executed on hardware.** The `i686-unknown-linux-gnu` target was installed and `lmfk-abi` compiles for it, and `.github/workflows/ci.yml` runs that 32-bit check plus the C assertion suite. However, tests were **not executed** on an actual 32-bit host or on armv7; ILP32 layout is validated by conditional C assertions and pointer-relative Rust formulas. Running the test suite on real armv7 hardware remains open.
 - **No cargo-fuzz / `arbitrary` integration yet.** The 2000-mutation deterministic loop is a substitute, not a real fuzzing campaign; coverage-guided fuzzing is still to be wired in.
 - **IPC semantics incomplete.** Opcode semantics and handle-revocation edge cases (race with in-flight requests, reissue after framework restart, per-opcode handle lifetime) still need to be specified before the IPC protocol can be declared complete.
-- **Crypto crate and CLI tools are FROZEN and uncommitted.** `crates/lmfk-drv-crypto` and the three tools `drvinfo`, `drvverify` and `drvpack` have been implemented locally but are **frozen pending this review** — they are deliberately outside this lot.
-- **No commit has been made** for this lot. The working tree contains the changes described above, uncommitted.
+- **Crypto crate and CLI tools are committed and preserved as experimental.** `crates/lmfk-drv-crypto` and the three tools `drvinfo`, `drvverify` and `drvpack` have been **committed** to the repository and are preserved as experimental code for reference. They are historical and off the current roadmap.
+- **The work is committed.** The changes described above are committed and preserved for reference.
 
 ## 6. Conclusion
 
-This batch is complete and its non-cryptographic part is validated to the extent documented above. **We request review and explicit authorization before any commit is made and before the cryptographic phase is resumed.** Open issues in section 5 — in particular real ILP32 execution, fuzzing integration and IPC opcode/revocation semantics — should be acknowledged or assigned before sign-off.
+This batch is complete and its non-cryptographic part was validated to the extent documented above. The work is **committed** and preserved as experimental/historical for reference; it is not the current roadmap. Open issues in section 5 — in particular real ILP32 execution, fuzzing integration and IPC opcode/revocation semantics — remain documented for reference.

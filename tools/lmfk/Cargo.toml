@@ -1,0 +1,13 @@
+[package]
+name = "lmfk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LMFK command-line interface"
+
+[dependencies]
+lmfk-core = { path = "../../crates/lmfk-core" }
+lmfk-hw = { path = "../../crates/lmfk-hw" }
+serde_json = "1"

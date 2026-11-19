@@ -1,3 +1,7 @@
+> **HISTORICAL / EXPERIMENTAL DOCUMENT** — describes the former hybrid-kernel/stable-ABI project. LMFK is now a Linux driver manager for EXISTING Linux drivers; see [docs/en/04-driver-manager-spec.md](04-driver-manager-spec.md). Preserved for reference, not the current roadmap.
+
+---
+
 # LMFK — ABI v1 Contract
 
 *Normative document. This page defines the stable boundary between the framework and its drivers. It deliberately distinguishes two boundaries that must not be confused: an in-process native ABI and a pointer-free IPC wire protocol. The reference implementation lives in `crates/lmfk-abi` and `include/lmfk/abi.h`.*

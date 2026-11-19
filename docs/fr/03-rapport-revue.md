@@ -1,6 +1,10 @@
+> **DOCUMENT HISTORIQUE / EXPÉRIMENTAL** — décrit l'ancien projet de noyau hybride / ABI stable. LMFK est désormais un gestionnaire de pilotes Linux pour les pilotes Linux EXISTANTS ; voir [docs/en/04-driver-manager-spec.md](../en/04-driver-manager-spec.md). Conservé pour référence, hors feuille de route actuelle.
+
+---
+
 # LMFK — Revue technique et décisions
 
-*Document de revue pour le lot courant (contrat ABI v1, durcissement du conteneur `.drv` et CBOR déterministe). Ce lot n'est **pas commité** : il est soumis à revue et à autorisation. Aucune phase cryptographique ne sera reprise avant cette autorisation.*
+*Document de revue pour l'ancien lot (contrat ABI v1, durcissement du conteneur `.drv` et CBOR déterministe). Ce travail est désormais **commité** et préservé à titre expérimental/historique ; il est conservé pour référence et ne constitue pas la feuille de route actuelle.*
 
 Documents associés : `00-cahier-des-charges.md`, `01-format-drv.md`, `02-contrat-abi.md`.
 
@@ -56,9 +60,9 @@ Documents associés : `00-cahier-des-charges.md`, `01-format-drv.md`, `02-contra
 - **ILP32 non exécuté sur matériel.** La cible `i686-unknown-linux-gnu` a été installée et `lmfk-abi` compile pour elle ; `.github/workflows/ci.yml` exécute ce contrôle 32 bits ainsi que la suite d'assertions C. Les tests n'ont toutefois **pas été exécutés** sur un hôte 32 bits réel ni sur armv7 : la mise en page ILP32 est validée par des assertions C conditionnelles et des formules Rust relatives à la largeur du pointeur. L'exécution de la suite de tests sur du matériel armv7 reste à faire.
 - **Pas encore d'intégration cargo-fuzz / `arbitrary`.** La boucle déterministe de 2000 mutations est un substitut, pas une véritable campagne de fuzzing ; le fuzzing guidé par couverture reste à brancher.
 - **Sémantique IPC incomplète.** La sémantique des opcodes et les cas limites de révocation de handles (course avec une requête en vol, réémission après redémarrage du framework, durée de vie des handles par opcode) doivent encore être spécifiés avant de déclarer le protocole IPC terminé.
-- **Crate crypto et outils CLI GELÉS et non commités.** `crates/lmfk-drv-crypto` et les trois outils `drvinfo`, `drvverify` et `drvpack` ont été implémentés localement mais sont **gelés dans l'attente de cette revue** — ils sont volontairement hors de ce lot.
-- **Aucun commit n'a été effectué** pour ce lot. L'arbre de travail contient les modifications décrites ci-dessus, non commitées.
+- **Crate crypto et outils CLI commités et préservés à titre expérimental.** `crates/lmfk-drv-crypto` et les trois outils `drvinfo`, `drvverify` et `drvpack` ont été **commités** dans le dépôt et sont préservés comme code expérimental pour référence. Ils sont historiques et hors de la feuille de route actuelle.
+- **Le travail est commité.** Les modifications décrites ci-dessus sont commitées et préservées pour référence.
 
 ## 6. Conclusion
 
-Ce lot est complet et sa partie non cryptographique est validée dans la mesure documentée ci-dessus. **Nous demandons une revue et une autorisation explicites avant tout commit et avant la reprise de la phase cryptographique.** Les points ouverts de la section 5 — en particulier l'exécution réelle en ILP32, l'intégration du fuzzing et la sémantique des opcodes/révocations IPC — doivent être pris en compte ou assignés avant validation.
+Ce lot est complet et sa partie non cryptographique a été validée dans la mesure documentée ci-dessus. Le travail est **commité** et préservé à titre expérimental/historique pour référence ; il ne constitue pas la feuille de route actuelle. Les points ouverts de la section 5 — en particulier l'exécution réelle en ILP32, l'intégration du fuzzing et la sémantique des opcodes/révocations IPC — restent documentés pour référence.

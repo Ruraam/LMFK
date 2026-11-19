@@ -1,3 +1,7 @@
+> **HISTORICAL / EXPERIMENTAL DOCUMENT** — describes the former hybrid-kernel/stable-ABI project. LMFK is now a Linux driver manager for EXISTING Linux drivers; see [docs/en/04-driver-manager-spec.md](04-driver-manager-spec.md). Preserved for reference, not the current roadmap.
+
+---
+
 # LMFK — `.drv` Package Format v1
 
 *Binary specification. This document defines the container, the manifest and the signature zone. Cryptographic verification is implemented in a later phase; the format, however, is frozen now.*

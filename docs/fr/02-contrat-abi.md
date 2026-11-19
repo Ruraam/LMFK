@@ -1,3 +1,7 @@
+> **DOCUMENT HISTORIQUE / EXPÉRIMENTAL** — décrit l'ancien projet de noyau hybride / ABI stable. LMFK est désormais un gestionnaire de pilotes Linux pour les pilotes Linux EXISTANTS ; voir [docs/en/04-driver-manager-spec.md](../en/04-driver-manager-spec.md). Conservé pour référence, hors feuille de route actuelle.
+
+---
+
 # LMFK — Contrat ABI v1
 
 *Document normatif. Cette page définit la frontière stable entre le framework et ses pilotes. Elle distingue volontairement deux frontières qu'il ne faut pas confondre : un ABI natif « in-process » et un protocole filaire IPC sans pointeurs. L'implémentation de référence se trouve dans `crates/lmfk-abi` et `include/lmfk/abi.h`.*

@@ -1,3 +1,7 @@
+> **HISTORICAL / EXPERIMENTAL DOCUMENT** — describes the former hybrid-kernel/stable-ABI project. LMFK is now a Linux driver manager for EXISTING Linux drivers; see [docs/en/04-driver-manager-spec.md](04-driver-manager-spec.md). Preserved for reference, not the current roadmap.
+
+---
+
 # LMFK — Technical Specification v0.1
 
 *Working document. Decisions already arbitrated according to the initial recommendation: **hybrid kernel**, retained Linux base, independent Driver Framework, progressive Linux compatibility.*
