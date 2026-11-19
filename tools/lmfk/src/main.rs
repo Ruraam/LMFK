@@ -127,7 +127,7 @@ fn print_text(inventory: &Inventory) {
         ));
         line(&format!(
             "  vendor {}  device {}  class {}",
-            device.vendor.id, device.device.id, device.class.id
+            device.vendor.id, device.device.id, device.class.code
         ));
         line(&format!("  modalias: {}", device.modalias));
         line(&format!(
@@ -141,7 +141,7 @@ fn print_text(inventory: &Inventory) {
                 let bound = interface.driver.bound.as_deref().unwrap_or("none");
                 line(&format!(
                     "    {} class {} driver {bound} ({:?})",
-                    interface.id, interface.class.id, interface.driver.state
+                    interface.id, interface.class.code, interface.driver.state
                 ));
             }
         }

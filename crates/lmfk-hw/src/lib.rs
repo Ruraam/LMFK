@@ -7,8 +7,8 @@
 use std::{fs, io::ErrorKind, path::Path};
 
 use lmfk_core::{
-    Bus, Category, Device, Driver, DriverState, Host, IdName, Inventory, ScanError, ScanMeta,
-    Subsystem, UsbInterface,
+    Bus, Category, ClassInfo, Device, Diagnosis, Driver, DriverState, Host, IdName, Inventory,
+    ScanError, ScanMeta, Subsystem, UsbInterface,
 };
 
 #[derive(Debug, Clone)]
@@ -68,14 +68,29 @@ fn read_required(
     }
 }
 
-fn read_optional(dir: &Path, name: &str, sources: &mut Vec<String>) -> Option<String> {
+fn read_optional(
+    dir: &Path,
+    name: &str,
+    sources: &mut Vec<String>,
+    errors: &mut Vec<ScanError>,
+) -> Option<String> {
     let path = dir.join(name);
     match fs::read_to_string(&path) {
         Ok(value) => {
             record_source(sources, path.display().to_string());
             Some(value.trim().to_owned())
         }
-        Err(_) => None,
+        // A missing optional attribute is normal; any other access problem is
+        // recorded instead of being silently treated as an absence.
+        Err(error) if error.kind() == ErrorKind::NotFound => None,
+        Err(error) => {
+            record_error(
+                errors,
+                path.display().to_string(),
+                format!("cannot read optional attribute: {error}"),
+            );
+            None
+        }
     }
 }
 
@@ -191,8 +206,8 @@ fn empty_device(id: String, bus: Bus, path: &Path) -> Device {
     Device {
         id,
         bus,
-        class: IdName {
-            id: String::new(),
+        class: ClassInfo {
+            code: String::new(),
             name: Category::Unknown.label().to_owned(),
         },
         vendor: IdName {
@@ -237,7 +252,18 @@ fn scan_pci(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
     };
 
     let mut devices = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                record_error(
+                    errors,
+                    bus_root.display().to_string(),
+                    format!("cannot read PCI directory entry: {error}"),
+                );
+                continue;
+            }
+        };
         let name = entry.file_name().to_string_lossy().into_owned();
         let dir = entry.path();
         let mut device = empty_device(format!("pci:{name}"), Bus::Pci, &dir);
@@ -248,13 +274,15 @@ fn scan_pci(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         let modalias = read_required(&dir, "modalias", sources, errors);
         device.vendor.id = parse_hex_id(vendor, 4).unwrap_or_default();
         device.device.id = parse_hex_id(device_id, 4).unwrap_or_default();
-        device.class.id = parse_hex_id(class, 6).unwrap_or_default();
+        device.class.code = parse_hex_id(class, 6).unwrap_or_default();
         device.modalias = clean_modalias(modalias, &dir, errors);
-        device.class.name = classify_pci(&device.class.id).label().to_owned();
+        device.class.name = classify_pci(&device.class.code).label().to_owned();
         device.subsystem.vendor =
-            parse_hex_id(read_optional(&dir, "subsystem_vendor", sources), 4).unwrap_or_default();
+            parse_hex_id(read_optional(&dir, "subsystem_vendor", sources, errors), 4)
+                .unwrap_or_default();
         device.subsystem.device =
-            parse_hex_id(read_optional(&dir, "subsystem_device", sources), 4).unwrap_or_default();
+            parse_hex_id(read_optional(&dir, "subsystem_device", sources, errors), 4)
+                .unwrap_or_default();
         device.driver = read_driver(&dir, sources, errors);
         device.parent = pci_parent(root, &dir);
         devices.push(device);
@@ -282,8 +310,8 @@ fn scan_usb_interface(
         id: format!("usb:{name}"),
         device_id: device_id.to_owned(),
         interface_number,
-        class: IdName {
-            id: class_id,
+        class: ClassInfo {
+            code: class_id,
             name: category.interface_label().to_owned(),
         },
         modalias,
@@ -309,7 +337,18 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
     };
 
     let mut devices = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                record_error(
+                    errors,
+                    bus_root.display().to_string(),
+                    format!("cannot read USB directory entry: {error}"),
+                );
+                continue;
+            }
+        };
         let name = entry.file_name().to_string_lossy().into_owned();
         // Entries containing ':' are USB interfaces, enumerated from their
         // parent device below. Root hubs such as "usb1" are devices.
@@ -321,7 +360,7 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         let mut device = empty_device(id.clone(), Bus::Usb, &dir);
 
         let raw_class = read_required(&dir, "bDeviceClass", sources, errors);
-        device.class.id = parse_hex_id(raw_class, 2).unwrap_or_default();
+        device.class.code = parse_hex_id(raw_class, 2).unwrap_or_default();
         // The USB device itself is always classified as USB; a more specific
         // category is assigned to each interface using its interface class.
         device.class.name = Category::Usb.label().to_owned();
@@ -338,22 +377,45 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         device.parent = usb_parent(&name);
 
         let prefix = format!("{name}:");
-        if let Ok(children) = fs::read_dir(&dir) {
-            let mut names: Vec<String> = children
-                .flatten()
-                .map(|child| child.file_name().to_string_lossy().into_owned())
-                .filter(|child| child.starts_with(&prefix))
-                .collect();
-            names.sort();
-            for child in names {
-                let child_dir = dir.join(&child);
-                if !child_dir.is_dir() {
-                    continue;
+        match fs::read_dir(&dir) {
+            Ok(children) => {
+                let mut names = Vec::new();
+                for child in children {
+                    match child {
+                        Ok(child) => {
+                            let child_name = child.file_name().to_string_lossy().into_owned();
+                            if child_name.starts_with(&prefix) {
+                                names.push(child_name);
+                            }
+                        }
+                        Err(error) => record_error(
+                            errors,
+                            dir.display().to_string(),
+                            format!("cannot read USB interface entry: {error}"),
+                        ),
+                    }
                 }
-                device
-                    .interfaces
-                    .push(scan_usb_interface(&child_dir, &id, &child, sources, errors));
+                names.sort();
+                for child in names {
+                    let child_dir = dir.join(&child);
+                    if !child_dir.is_dir() {
+                        record_error(
+                            errors,
+                            child_dir.display().to_string(),
+                            "USB interface disappeared or is not a directory",
+                        );
+                        continue;
+                    }
+                    device
+                        .interfaces
+                        .push(scan_usb_interface(&child_dir, &id, &child, sources, errors));
+                }
             }
+            Err(error) => record_error(
+                errors,
+                dir.display().to_string(),
+                format!("cannot enumerate USB interfaces: {error}"),
+            ),
         }
         devices.push(device);
     }
@@ -367,6 +429,15 @@ pub fn scan(options: &ScanOptions<'_>) -> Inventory {
     let mut devices = scan_pci(options.root, &mut sources, &mut errors);
     devices.extend(scan_usb(options.root, &mut sources, &mut errors));
     devices.sort_by(|a, b| a.id.cmp(&b.id));
+
+    // Schema v1.0 requires an explicit PACKAGE_UNKNOWN diagnosis whenever
+    // no package suggestion exists. Phase 1 has no package backends, so this
+    // records an absence of information; it never invents a module or package.
+    for device in &mut devices {
+        if device.package_suggestions.is_empty() {
+            device.diagnosis.push(Diagnosis::package_unknown());
+        }
+    }
 
     let meta = ScanMeta {
         sources,

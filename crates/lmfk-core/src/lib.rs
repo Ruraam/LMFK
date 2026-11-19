@@ -6,6 +6,10 @@
 
 use serde::Serialize;
 
+pub mod validation;
+
+pub use validation::validate_json;
+
 /// Current inventory schema version. Readers must check it before use.
 pub const SCHEMA_VERSION: &str = "1.0";
 
@@ -84,6 +88,13 @@ pub struct IdName {
     pub name: String,
 }
 
+/// Schema v1.0 uses `code` for class objects, not `id`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClassInfo {
+    pub code: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Subsystem {
     pub vendor: String,
@@ -134,7 +145,7 @@ pub struct UsbInterface {
     pub id: String,
     pub device_id: String,
     pub interface_number: u32,
-    pub class: IdName,
+    pub class: ClassInfo,
     pub modalias: String,
     pub driver: Driver,
 }
@@ -143,7 +154,7 @@ pub struct UsbInterface {
 pub struct Device {
     pub id: String,
     pub bus: Bus,
-    pub class: IdName,
+    pub class: ClassInfo,
     pub vendor: IdName,
     pub device: IdName,
     pub subsystem: Subsystem,
@@ -237,6 +248,29 @@ pub struct Diagnosis {
     pub evidence: Vec<String>,
     pub advised_action: String,
     pub message: String,
+}
+
+impl Diagnosis {
+    /// Required by schema v1.0 whenever `package_suggestions` is empty.
+    /// It states an absence of information, not a hardware problem.
+    pub fn package_unknown() -> Self {
+        Self {
+            code: "PACKAGE_UNKNOWN".to_owned(),
+            title: "No package could be identified".to_owned(),
+            explanation:
+                "No distribution package lookup was performed in this phase, so no package can be named."
+                    .to_owned(),
+            severity: Severity::Info,
+            evidence: vec!["no package backend queried in Phase 1".to_owned()],
+            advised_action:
+                "Search your distribution's packages using the hardware IDs or modalias."
+                    .to_owned(),
+            message:
+                "No package could be identified. No distribution package lookup was performed, \
+                 so none is suggested. Search your distribution's packages with the hardware IDs."
+                    .to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use lmfk_core::{DriverState, Host, SCHEMA_VERSION, SecureBoot};
+use lmfk_core::{DriverState, Host, SCHEMA_VERSION, SecureBoot, validate_json};
 use lmfk_hw::{ScanOptions, scan};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -166,7 +166,7 @@ fn pci_and_usb_fixtures_are_inventoried() {
         .unwrap();
     assert_eq!(vga.vendor.id, "0x8086");
     assert_eq!(vga.device.id, "0x9bc4");
-    assert_eq!(vga.class.id, "0x030000");
+    assert_eq!(vga.class.code, "0x030000");
     assert_eq!(vga.class.name, "Graphics controller");
     assert_eq!(vga.subsystem.vendor, "0x8086");
     assert_eq!(vga.driver.bound.as_deref(), Some("i915"));
@@ -285,12 +285,72 @@ fn scan_writes_nothing() {
 }
 
 #[test]
+fn enumeration_errors_are_recorded_not_silently_ignored() {
+    let fixture = Fixture::new("enum-errors");
+    let inventory = scan_fixture(&fixture);
+    assert!(inventory.devices.is_empty());
+    assert!(
+        inventory
+            .scan
+            .errors
+            .iter()
+            .any(|e| e.message.contains("cannot enumerate PCI devices"))
+    );
+    assert!(
+        inventory
+            .scan
+            .errors
+            .iter()
+            .any(|e| e.message.contains("cannot enumerate USB devices"))
+    );
+    assert_eq!(inventory.summary.errors, inventory.scan.errors.len());
+}
+
+#[test]
+fn inaccessible_usb_interface_is_reported_as_unknown() {
+    let fixture = Fixture::new("usb-iface-error");
+    fixture.write("bus/usb/devices/1-3/idVendor", "0x1234\n");
+    fixture.write("bus/usb/devices/1-3/idProduct", "0x5678\n");
+    fixture.write("bus/usb/devices/1-3/bDeviceClass", "0x00\n");
+    fixture.write(
+        "bus/usb/devices/1-3/modalias",
+        "usb:v1234p5678d0000dc00dsc00dp00ic00isc00if00\n",
+    );
+    // A directory where bInterfaceClass is expected produces a read error.
+    fs::create_dir_all(fixture.path("bus/usb/devices/1-3/1-3:1.0/bInterfaceClass")).unwrap();
+    fixture.write(
+        "bus/usb/devices/1-3/1-3:1.0/modalias",
+        "usb:v1234p5678d0000dc00dsc00dp00ic00isc00if00\n",
+    );
+
+    let inventory = scan_fixture(&fixture);
+    let device = &inventory.devices[0];
+    assert_eq!(device.interfaces.len(), 1);
+    assert_eq!(device.interfaces[0].class.code, "");
+    assert_eq!(device.interfaces[0].class.name, "Unknown interface");
+    assert!(
+        inventory
+            .scan
+            .errors
+            .iter()
+            .any(|e| e.message.contains("cannot read"))
+    );
+    assert!(validate_json(&serde_json::to_value(inventory).unwrap()).is_ok());
+}
+
+#[test]
 fn json_matches_schema_v1() {
     let fixture = build_full_fixture();
     let inventory = scan_fixture(&fixture);
     let json = inventory.to_json().unwrap();
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
 
+    let violations = validate_json(&value);
+    assert!(
+        violations.is_ok(),
+        "contract violations: {:?}",
+        violations.err()
+    );
     assert_eq!(value["schema_version"], SCHEMA_VERSION);
     assert_eq!(value["scan"]["read_only"], true);
     assert_eq!(value["summary"]["devices"], 4);
@@ -318,6 +378,18 @@ fn json_matches_schema_v1() {
         }
         assert!(device["modules"].as_array().unwrap().is_empty());
         assert!(device["package_suggestions"].as_array().unwrap().is_empty());
-        assert!(device["diagnosis"].as_array().unwrap().is_empty());
+        let diagnoses = device["diagnosis"].as_array().unwrap();
+        assert_eq!(diagnoses.len(), 1);
+        assert_eq!(diagnoses[0]["code"], "PACKAGE_UNKNOWN");
+        assert!(
+            diagnoses[0]["title"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+        );
+        assert!(
+            diagnoses[0]["advised_action"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+        );
     }
 }
