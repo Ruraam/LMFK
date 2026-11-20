@@ -4,7 +4,7 @@
 //! metadata contents read from the running kernel's module directory and
 //! /proc/modules, making parsing deterministic and fixture-testable.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use lmfk_core::{MatchSource, Module, ModuleState};
 
