@@ -1,6 +1,6 @@
 # LMFK Hardware & Driver Scanner — Specification
 
-*Status: proposed. This document specifies the read-only hardware and driver scanner described in `04-driver-manager-spec.md`. It is the detailed behavioural contract for phases 1–4.*
+*Status: phased specification. Sections 1–2 define the Phase 1 scanner boundary. Later sections describe future capabilities and must not be interpreted as Phase 1 acceptance criteria.*
 
 > The scanner's only product is an immutable `Inventory` as defined by `06-inventory-schema.md`. It never changes the system.
 
@@ -8,18 +8,31 @@
 
 ## 1. Scope
 
-The LMFK scanner performs **read-only** detection of hardware and its Linux drivers. It:
+### Phase 1 — hardware discovery (implemented milestone)
 
-- enumerates **PCI** and **USB** devices (and reads device-tree information where present) through `/sys`;
-- **classifies** each device as `network`, `graphics`, `audio`, `storage` or `other`, using the class code where available;
-- collects **identifiers**: vendor, device and subsystem IDs, class code, and human-readable names where known;
-- collects each device's **modalias** and the **associated Linux modules** resolved from kernel metadata;
-- determines, for each module, a **state**: `loaded`, `available`, `builtin`, `missing` or `unknown`;
-- checks **firmware presence**: which firmware files a module declares versus which are actually present on disk;
-- computes **package suggestions** from distribution backends, with a reason and confidence; and
-- produces a **clear, structured inventory** with explicit errors and diagnoses, rendered as human-readable text or JSON.
+Phase 1 is strictly read-only and is limited to hardware discovery:
 
-Every reported fact is traceable to a named source recorded in `scan.sources`.
+- enumerate **PCI**, **USB** (devices and interfaces), and **Device Tree** nodes exposed by sysfs;
+- collect the identifiers and properties actually exposed by each bus, including PCI/USB IDs, Device Tree `compatible` strings, class codes, and modalias values where present;
+- record the currently bound driver through existing sysfs driver links, without loading, unloading, binding, or probing modules;
+- preserve partial results and report enumeration, access, and malformed-data errors;
+- produce the versioned inventory as text or JSON on stdout.
+
+A missing optional sysfs property is not itself an error. A present but malformed property must be reported. Every source actually consulted by the scanner must be represented in `scan.sources`.
+
+### Explicitly deferred to later phases
+
+The following are **not Phase 1 acceptance criteria** and must not be implemented as part of the hardware scanner milestone:
+
+- module matching and module-state resolution — Phase 2;
+- firmware declaration and presence analysis — Phase 3;
+- distribution package backends and package suggestions — Phase 4 and later;
+- expanded diagnostics — Phase 5;
+- complete CLI workflows — Phase 6;
+- binary-first resolution — Phase 7;
+- installation or any other mutating operation — Phase 8.
+
+The Phase 1 inventory keeps the schema's future-facing fields present but empty when their corresponding phase has not run. In particular, an empty `modules`, `firmwares`, or `package_suggestions` array is not evidence that a driver or firmware is missing. `PACKAGE_UNKNOWN` only records that no package lookup was performed.
 
 ---
 
@@ -48,7 +61,7 @@ All data comes from the following sources. Network access and writes are exclude
 | `/sys/bus/pci/devices` | Enumerate PCI devices; read IDs, class, modalias, driver link, parent. | `read_dir` / `read` |
 | `/sys/bus/usb/devices` | Enumerate USB devices **and interfaces**; read IDs, class, modalias, driver link. | `read_dir` / `read` |
 | `/sys/class` | Cross-check device classes and friendly names for network, graphics, audio, storage. | `read_dir` / `read` |
-| `/sys/firmware/devicetree` | Device-tree based discovery on DT platforms; read compatible strings and modalias. | `read_dir` / `read` |
+| `/sys/firmware/devicetree/base` | Phase 1 Device Tree node enumeration and `compatible` properties. | `read_dir` / `read` |
 | `/proc/modules` or `lsmod` | Determine which modules are currently loaded. | `read` / allowlisted read-only command |
 | `/lib/modules/<release>/modules.alias(.bin)` | Map modalias patterns to module names. | `read` |
 | `/lib/modules/<release>/modules.builtin` | Identify modules built into the running kernel. | `read` |
