@@ -468,16 +468,16 @@ fn device_tree_compatible_nodes_are_discovered_read_only() {
 
     assert_eq!(before, after, "Device Tree scan must not modify its fixture");
     assert_eq!(inventory.devices.len(), 3);
-    let board = inventory.devices.iter().find(|device| device.id == "dt:/").unwrap();
+    let board = inventory.devices.iter().find(|device| device.id == "dt:root").unwrap();
     assert_eq!(board.bus, lmfk_core::Bus::Dt);
     assert_eq!(board.vendor.name, "acme");
     assert_eq!(board.device.name, "acme,board");
     assert!(board.parent.is_none());
     let uart = inventory.devices
         .iter()
-        .find(|device| device.id == "dt:/soc/serial@1000")
+        .find(|device| device.id == "dt:soc:serial@1000")
         .unwrap();
-    assert_eq!(uart.parent.as_deref(), Some("dt:/soc"));
+    assert_eq!(uart.parent.as_deref(), Some("dt:soc"));
     assert!(inventory.scan.sources.iter().any(|source| source.ends_with("/compatible")));
     assert!(validate_json(&serde_json::to_value(inventory).unwrap()).is_ok());
 }
