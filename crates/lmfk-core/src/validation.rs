@@ -552,22 +552,23 @@ fn is_rfc3339_timestamp(value: &str) -> bool {
         }
     }
 
-    match bytes.get(position..) {
-        Some([b'Z']) => true,
-        Some([sign @ (b'+' | b'-'), hour_tens, hour_ones, b':', minute_tens, minute_ones]) => {
-            let offset_hour = u32::from(hour_tens - b'0') * 10 + u32::from(hour_ones - b'0');
-            let offset_minute =
-                u32::from(minute_tens - b'0') * 10 + u32::from(minute_ones - b'0');
-            (*sign == b'+' || *sign == b'-')
-                && hour_tens.is_ascii_digit()
-                && hour_ones.is_ascii_digit()
-                && minute_tens.is_ascii_digit()
-                && minute_ones.is_ascii_digit()
-                && offset_hour <= 23
-                && offset_minute <= 59
-        }
-        _ => false,
+    let Some(suffix) = bytes.get(position..) else {
+        return false;
+    };
+    if suffix == b"Z" {
+        return true;
     }
+    if suffix.len() != 6
+        || !matches!(suffix[0], b'+' | b'-')
+        || suffix[3] != b':'
+        || !suffix[1..3].iter().all(u8::is_ascii_digit)
+        || !suffix[4..6].iter().all(u8::is_ascii_digit)
+    {
+        return false;
+    }
+    let offset_hour = u32::from(suffix[1] - b'0') * 10 + u32::from(suffix[2] - b'0');
+    let offset_minute = u32::from(suffix[4] - b'0') * 10 + u32::from(suffix[5] - b'0');
+    offset_hour <= 23 && offset_minute <= 59
 }
 
 fn require<'a>(
