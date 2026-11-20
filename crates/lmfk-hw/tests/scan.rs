@@ -377,6 +377,14 @@ fn usb_absent_optional_attributes_are_not_errors() {
     assert_eq!(interface.class.name, "Unknown interface");
     assert_eq!(device.diagnosis.len(), 1);
     assert_eq!(device.diagnosis[0].code, "PACKAGE_UNKNOWN");
+    assert!(
+        inventory.scan.sources.iter().any(|source| source.ends_with("/bDeviceClass")),
+        "missing optional attributes must still be auditable"
+    );
+    assert!(
+        inventory.scan.sources.iter().any(|source| source.ends_with("/driver")),
+        "absent driver links must still be auditable"
+    );
     assert!(validate_json(&serde_json::to_value(inventory).unwrap()).is_ok());
 }
 
