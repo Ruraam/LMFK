@@ -80,7 +80,7 @@
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | string | Stable public identifier, e.g. `pci:0000:00:02.0`, `usb:1-4` or `dt:/soc/serial@1000`. Never an absolute path. |
+| `id` | string | Stable public identifier, e.g. `pci:0000:00:02.0`, `usb:1-4` or `dt:soc:serial@1000`. Never an absolute path. |
 | `bus` | string | `"pci"`, `"usb"` or `"dt"` (Device Tree). |
 | `class` | object | Device class with `code` and `name` (see §6). |
 | `vendor` | object | Vendor with `id` and `name` (see §6). |
