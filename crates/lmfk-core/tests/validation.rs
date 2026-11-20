@@ -89,6 +89,8 @@ fn rejects_invalid_rfc3339_timestamp() {
     let mut doc = valid_inventory();
     doc["generated_at"] = json!("yesterday at noon");
     assert_schema_invalid(&doc);
+    let errors = validate_json(&doc).unwrap_err();
+    assert!(errors.iter().any(|error| error.contains("RFC 3339")));
 }
 
 #[test]
