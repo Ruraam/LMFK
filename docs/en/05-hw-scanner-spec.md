@@ -60,20 +60,20 @@ All data comes from the following sources. Network access and writes are exclude
 |---|---|---|
 | `/sys/bus/pci/devices` | Enumerate PCI devices; read IDs, class, modalias, driver link, parent. | `read_dir` / `read` |
 | `/sys/bus/usb/devices` | Enumerate USB devices **and interfaces**; read IDs, class, modalias, driver link. | `read_dir` / `read` |
-| `/sys/class` | Cross-check device classes and friendly names for network, graphics, audio, storage. | `read_dir` / `read` |
+| `/sys/class` | Future cross-check of device classes and friendly names; not read in Phase 1. | `read_dir` / `read` |
 | `/sys/firmware/devicetree/base` | Phase 1 Device Tree node enumeration and `compatible` properties. | `read_dir` / `read` |
 | `/proc/modules` or `lsmod` | Future Phase 2 module-state inspection; not read in Phase 1. | `read` / allowlisted read-only command |
 | `/lib/modules/<release>/modules.alias(.bin)` | Future Phase 2 module matching; not read in Phase 1. | `read` |
-| `/lib/modules/<release>/modules.builtin` | Identify modules built into the running kernel. | `read` |
-| `/lib/modules/<release>/modules.dep` | Resolve module dependency lists. | `read` |
-| `modinfo` | Read module metadata: `firmware:` entries, build/compatibility information such as `vermagic`, and signature information (read-only, fixed arguments). | allowlisted read-only command |
-| `uname -r`, `uname -m` | Record the exact kernel release and machine architecture used for compatibility checks. | allowlisted read-only commands |
+| `/lib/modules/<release>/modules.builtin` | Future Phase 2 module matching; not read in Phase 1. | `read` |
+| `/lib/modules/<release>/modules.dep` | Future module dependency resolution; not read in Phase 1. | `read` |
+| `modinfo` | Future module metadata and firmware inspection; not invoked in Phase 1. | allowlisted read-only command |
+| `uname -r`, `uname -m` | Future compatibility metadata; Phase 1 reads kernel release/version from `/proc` and architecture from the Rust target. | allowlisted read-only commands |
 | `/proc/config.gz`, `/boot/config-<release>` | Future-phase kernel configuration inspection. | `read` |
 | `/proc/sys/kernel/osrelease`, `/proc/version` | Phase 1 host kernel release and version metadata. | `read` |
 | `/lib/firmware`, `/usr/lib/firmware` | Future-phase firmware presence checks. | `read_dir` / `read` (existence) |
 | `/etc/os-release` | Identify distribution ID and version for host metadata. | `read` |
 | `/sys/firmware/efi/efivars/SecureBoot-*` | Read the Secure Boot state when the firmware exposes it. If absent or unreadable, report `unknown`; never infer a state. | `read` |
-| Package-manager query commands | Read-only package lookups per backend (see `04-driver-manager-spec.md` §5). | allowlisted read-only commands only |
+| Package-manager query commands | Future distribution package lookups; not executed in Phase 1. | allowlisted read-only commands only |
 
 `<release>` is the running kernel release (`uname -r`), obtained through an allowlisted read-only command or an equivalent kernel-provided file. Every source actually consulted is recorded in `scan.sources`.
 
