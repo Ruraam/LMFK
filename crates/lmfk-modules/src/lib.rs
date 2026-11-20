@@ -119,9 +119,9 @@ impl ModuleIndex {
             let fields: Vec<_> = line.split_whitespace().collect();
             let valid_address = fields.get(5).is_some_and(|address| {
                 *address == "0"
-                    || address
-                        .strip_prefix("0x")
-                        .is_some_and(|hex| !hex.is_empty() && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+                    || address.strip_prefix("0x").is_some_and(|hex| {
+                        !hex.is_empty() && hex.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
             });
             let valid_record = fields.len() == 6
                 && !fields[0].is_empty()
