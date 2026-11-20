@@ -127,8 +127,11 @@ fn parse_hex_id(
     errors: &mut Vec<ScanError>,
 ) -> Option<String> {
     let raw = raw?;
-    let digits = raw.trim().strip_prefix("0x").or_else(|| raw.trim().strip_prefix("0X"))
-        .unwrap_or(raw.trim());
+    let trimmed = raw.trim();
+    let digits = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .unwrap_or(trimmed);
     if digits.len() != width || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         record_error(
             errors,
@@ -300,16 +303,22 @@ fn scan_pci(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         device.class.code = parse_hex_id(class, 6, &dir, "class", errors).unwrap_or_default();
         device.modalias = clean_modalias(modalias, &dir, errors);
         device.class.name = classify_pci(&device.class.code).label().to_owned();
-        device.subsystem.vendor =
-            parse_hex_id(
-                read_optional(&dir, "subsystem_vendor", sources, errors),
-                4, &dir, "subsystem_vendor", errors,
-            ).unwrap_or_default();
-        device.subsystem.device =
-            parse_hex_id(
-                read_optional(&dir, "subsystem_device", sources, errors),
-                4, &dir, "subsystem_device", errors,
-            ).unwrap_or_default();
+        device.subsystem.vendor = parse_hex_id(
+            read_optional(&dir, "subsystem_vendor", sources, errors),
+            4,
+            &dir,
+            "subsystem_vendor",
+            errors,
+        )
+        .unwrap_or_default();
+        device.subsystem.device = parse_hex_id(
+            read_optional(&dir, "subsystem_device", sources, errors),
+            4,
+            &dir,
+            "subsystem_device",
+            errors,
+        )
+        .unwrap_or_default();
         device.driver = read_driver(&dir, sources, errors);
         device.parent = pci_parent(root, &dir);
         devices.push(device);
@@ -515,7 +524,8 @@ fn scan_device_tree(
                     device.parent = if relative.is_empty() {
                         None
                     } else {
-                        let parent = Path::new(&relative).parent()
+                        let parent = Path::new(&relative)
+                            .parent()
                             .and_then(|value| value.to_str())
                             .unwrap_or("");
                         Some(if parent.is_empty() {
