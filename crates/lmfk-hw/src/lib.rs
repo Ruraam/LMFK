@@ -133,7 +133,11 @@ fn parse_hex_id(
         record_error(
             errors,
             source.join(field).display().to_string(),
-            format!("invalid hexadecimal {field} value: {raw}"),
+            if field == "USB class" {
+                format!("invalid USB class value: {raw}")
+            } else {
+                format!("invalid hexadecimal {field} value: {raw}")
+            },
         );
         return None;
     }
