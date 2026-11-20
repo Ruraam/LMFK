@@ -1,0 +1,284 @@
+//! Read-only parsing and correlation of Linux kernel module metadata.
+//!
+//! This crate deliberately performs no filesystem access. Callers provide
+//! metadata contents read from the running kernel's module directory and
+//! /proc/modules, making parsing deterministic and fixture-testable.
+
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+use lmfk_core::{MatchSource, Module, ModuleState};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseIssue {
+    pub line: usize,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleAlias {
+    pub pattern: String,
+    pub module: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModuleIndex {
+    aliases: Vec<ModuleAlias>,
+    builtin: BTreeSet<String>,
+    present: BTreeSet<String>,
+    dependencies: BTreeMap<String, Vec<String>>,
+    loaded: BTreeSet<String>,
+}
+
+impl ModuleIndex {
+    /// Parse the text form of modules.alias. Binary modules.alias.bin is not
+    /// decoded here; callers may use the text index when the kernel provides it.
+    pub fn parse_aliases(input: &str) -> (Vec<ModuleAlias>, Vec<ParseIssue>) {
+        let mut aliases = Vec::new();
+        let mut issues = Vec::new();
+        for (index, raw) in input.lines().enumerate() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let fields: Vec<_> = line.split_whitespace().collect();
+            if fields.len() != 3 || fields[0] != "alias" {
+                issues.push(ParseIssue { line: index + 1, message: "expected: alias <modalias-pattern> <module>".into() });
+                continue;
+            }
+            aliases.push(ModuleAlias {
+                pattern: fields[1].to_owned(),
+                module: normalize_module_name(fields[2]),
+            });
+        }
+        (aliases, issues)
+    }
+
+    /// Parse modules.builtin paths and derive canonical module names.
+    pub fn parse_builtin(input: &str) -> (BTreeSet<String>, Vec<ParseIssue>) {
+        parse_module_paths(input)
+    }
+
+    /// Parse modules.dep. Dependency paths are reduced to canonical module names.
+    pub fn parse_dependencies(input: &str) -> (BTreeMap<String, Vec<String>>, Vec<ParseIssue>) {
+        let mut map = BTreeMap::new();
+        let mut issues = Vec::new();
+        for (index, raw) in input.lines().enumerate() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+            let Some((module_path, deps)) = line.split_once(':') else {
+                issues.push(ParseIssue { line: index + 1, message: "missing ':' separator in modules.dep entry".into() });
+                continue;
+            };
+            let Some(module) = module_name_from_path(module_path) else {
+                issues.push(ParseIssue { line: index + 1, message: "invalid module path".into() });
+                continue;
+            };
+            let dependencies = deps.split_whitespace().filter_map(module_name_from_path).collect();
+            map.insert(module.clone(), dependencies);
+        }
+        (map, issues)
+    }
+
+    /// Parse /proc/modules. The first whitespace-delimited column is the name.
+    pub fn parse_loaded(input: &str) -> (BTreeSet<String>, Vec<ParseIssue>) {
+        let mut loaded = BTreeSet::new();
+        let mut issues = Vec::new();
+        for (index, raw) in input.lines().enumerate() {
+            let line = raw.trim();
+            if line.is_empty() { continue; }
+            let Some(name) = line.split_whitespace().next() else { continue; };
+            if line.split_whitespace().count() < 6 {
+                issues.push(ParseIssue { line: index + 1, message: "incomplete /proc/modules record".into() });
+                continue;
+            }
+            loaded.insert(normalize_module_name(name));
+        }
+        (loaded, issues)
+    }
+
+    pub fn from_metadata(aliases: &str, builtin: &str, dependencies: &str, loaded: &str) -> (Self, Vec<ParseIssue>) {
+        let (aliases, mut issues) = Self::parse_aliases(aliases);
+        let (builtin, mut builtin_issues) = Self::parse_builtin(builtin);
+        let (dependencies, mut dependency_issues) = Self::parse_dependencies(dependencies);
+        let (loaded, mut loaded_issues) = Self::parse_loaded(loaded);
+        issues.append(&mut builtin_issues);
+        issues.append(&mut dependency_issues);
+        issues.append(&mut loaded_issues);
+        let present = dependencies.keys().cloned().collect();
+        (Self { aliases, builtin, present, dependencies, loaded }, issues)
+    }
+
+    /// Return matching module candidates for a device modalias and optional
+    /// bound-driver link. No package inference or installation is attempted.
+    pub fn resolve(&self, modalias: &str, bound_driver: Option<&str>) -> Vec<Module> {
+        let mut candidates: BTreeMap<String, MatchSource> = BTreeMap::new();
+
+        if !modalias.is_empty() {
+            for alias in &self.aliases {
+                if glob_match(&alias.pattern, modalias) {
+                    candidates.entry(alias.module.clone()).or_insert(MatchSource::ModulesAlias);
+                }
+            }
+        }
+
+        if let Some(driver) = bound_driver.filter(|name| !name.trim().is_empty()) {
+            candidates.entry(normalize_module_name(driver)).or_insert(MatchSource::DriverLink);
+        }
+
+        candidates.into_iter().map(|(name, source)| {
+            let state = if self.loaded.contains(&name) {
+                ModuleState::Loaded
+            } else if self.builtin.contains(&name) {
+                ModuleState::Builtin
+            } else if self.present.contains(&name) {
+                ModuleState::Available
+            } else if source == MatchSource::DriverLink {
+                ModuleState::Unknown
+            } else {
+                ModuleState::Missing
+            };
+            let dependencies = self.dependencies.get(&name).cloned().unwrap_or_default();
+            Module { name, match_source: source, state, dependencies, firmwares: Vec::new() }
+        }).collect()
+    }
+
+    /// Return a stable, de-duplicated transitive dependency list. Cycles are
+    /// guarded against and the requested root module is excluded.
+    pub fn dependency_closure(&self, module: &str) -> Vec<String> {
+        let root = normalize_module_name(module);
+        let mut visited = BTreeSet::new();
+        let mut pending = self.dependencies.get(&root).cloned().unwrap_or_default();
+        while let Some(name) = pending.pop() {
+            if name == root || !visited.insert(name.clone()) { continue; }
+            if let Some(children) = self.dependencies.get(&name) {
+                pending.extend(children.iter().cloned());
+            }
+        }
+        visited.into_iter().collect()
+    }
+
+    pub fn is_builtin(&self, module: &str) -> bool { self.builtin.contains(&normalize_module_name(module)) }
+    pub fn is_loaded(&self, module: &str) -> bool { self.loaded.contains(&normalize_module_name(module)) }
+    pub fn is_present(&self, module: &str) -> bool { self.present.contains(&normalize_module_name(module)) }
+}
+
+fn parse_module_paths(input: &str) -> (BTreeSet<String>, Vec<ParseIssue>) {
+    let mut names = BTreeSet::new();
+    let mut issues = Vec::new();
+    for (index, raw) in input.lines().enumerate() {
+        let path = raw.trim();
+        if path.is_empty() || path.starts_with('#') { continue; }
+        match module_name_from_path(path) {
+            Some(name) => { names.insert(name); }
+            None => issues.push(ParseIssue { line: index + 1, message: "invalid module path".into() }),
+        }
+    }
+    (names, issues)
+}
+
+fn module_name_from_path(path: &str) -> Option<String> {
+    let file = path.rsplit('/').next()?;
+    let stem = file.strip_suffix(".ko")?;
+    Some(normalize_module_name(stem))
+}
+
+pub fn normalize_module_name(name: &str) -> String {
+    name.trim().replace('-', "_")
+}
+
+/// Match the wildcard syntax used by modules.alias: '*', '?', and bracket
+/// character classes. Matching is byte-oriented because modaliases are ASCII.
+fn glob_match(pattern: &str, value: &str) -> bool {
+    fn inner(p: &[u8], v: &[u8], memo: &mut HashSet<(usize, usize)>) -> bool {
+        if !memo.insert((p.len(), v.len())) { return false; }
+        if p.is_empty() { return v.is_empty(); }
+        match p[0] {
+            b'*' => inner(&p[1..], v, memo) || (!v.is_empty() && inner(p, &v[1..], memo)),
+            b'?' => !v.is_empty() && inner(&p[1..], &v[1..], memo),
+            b'[' => {
+                let Some(end) = p.iter().position(|b| *b == b']') else {
+                    return !v.is_empty() && p[0] == v[0] && inner(&p[1..], &v[1..], memo);
+                };
+                if v.is_empty() || end == 1 { return false; }
+                let mut class = &p[1..end];
+                let negated = class.first().is_some_and(|b| *b == b'!' || *b == b'^');
+                if negated { class = &class[1..]; }
+                let matched = class_match(class, v[0]);
+                (matched != negated) && inner(&p[end + 1..], &v[1..], memo)
+            }
+            byte => !v.is_empty() && byte == v[0] && inner(&p[1..], &v[1..], memo),
+        }
+    }
+    fn class_match(class: &[u8], byte: u8) -> bool {
+        let mut i = 0;
+        while i < class.len() {
+            if i + 2 < class.len() && class[i + 1] == b'-' {
+                if (class[i]..=class[i + 2]).contains(&byte) { return true; }
+                i += 3;
+            } else {
+                if class[i] == byte { return true; }
+                i += 1;
+            }
+        }
+        false
+    }
+    inner(pattern.as_bytes(), value.as_bytes(), &mut HashSet::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALIASES: &str = "alias pci:v00008086d0000157Bsv*bc02sc*ig* e1000e\nalias usb:v0BDAp8812d*dc*dsc*dp*ic*isc*ip* rtl88xxau\nalias pci:v0000AB[0-9]0d* test_driver";
+    const BUILTIN: &str = "kernel/drivers/net/ethernet/intel/e1000e.ko\nkernel/drivers/base/foo-bar.ko";
+    const DEP: &str = "kernel/drivers/net/ethernet/intel/e1000e.ko: kernel/drivers/net/ethernet/libphy.ko\nkernel/drivers/net/ethernet/libphy.ko:\nkernel/drivers/base/foo-bar.ko:";
+    const PROC: &str = "e1000e 245760 0 - Live 0xffffffffc0000000\nlibphy 16384 1 e1000e, Live 0xffffffffc0001000";
+
+    #[test]
+    fn parses_all_metadata_sources_and_normalizes_names() {
+        let (index, issues) = ModuleIndex::from_metadata(ALIASES, BUILTIN, DEP, PROC);
+        assert!(issues.is_empty(), "{issues:?}");
+        assert!(index.is_builtin("foo-bar"));
+        assert!(index.is_loaded("e1000e"));
+        assert!(index.is_present("libphy"));
+        assert_eq!(index.dependency_closure("e1000e"), vec!["libphy"]);
+    }
+
+    #[test]
+    fn resolves_loaded_builtin_available_and_missing_states() {
+        let (index, issues) = ModuleIndex::from_metadata(ALIASES, BUILTIN, DEP, PROC);
+        assert!(issues.is_empty());
+        let pci = index.resolve("pci:v00008086d0000157Bsv00008086sd00000000bc02sc00i00", None);
+        assert_eq!(pci.len(), 1);
+        assert_eq!(pci[0].name, "e1000e");
+        assert_eq!(pci[0].state, ModuleState::Loaded);
+
+        let usb = index.resolve("usb:v0BDAp8812d0000dc00dsc00dp00ic00isc00if00", None);
+        assert_eq!(usb[0].state, ModuleState::Missing);
+
+        let built = index.resolve("", Some("foo-bar"));
+        assert_eq!(built[0].name, "foo_bar");
+        assert_eq!(built[0].state, ModuleState::Builtin);
+        assert_eq!(built[0].match_source, MatchSource::DriverLink);
+
+        let unknown = index.resolve("", Some("out_of_tree_driver"));
+        assert_eq!(unknown[0].state, ModuleState::Unknown);
+    }
+
+    #[test]
+    fn reports_malformed_lines_without_panicking() {
+        let (_, aliases) = ModuleIndex::parse_aliases("alias only-two\nnot-an-alias");
+        let (_, deps) = ModuleIndex::parse_dependencies("broken-entry");
+        let (_, loaded) = ModuleIndex::parse_loaded("short record");
+        assert_eq!(aliases.len(), 2);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(loaded.len(), 1);
+    }
+
+    #[test]
+    fn matches_question_marks_and_character_classes() {
+        assert!(glob_match("pci:v0000AB[0-9]0d*", "pci:v0000AB70d123"));
+        assert!(glob_match("usb:v*ic?isc[0-3]if*", "usb:v123ic1isc2if00"));
+        assert!(!glob_match("usb:v*ic?isc[0-3]if*", "usb:v123ic1isc9if00"));
+    }
+}
