@@ -1,6 +1,6 @@
 # LMFK Hardware Inventory JSON Schema v1.0
 
-*Status: output-only contract for phase 0. No writer or ingestion implementation exists yet; this document defines the shape that future implementations must emit and consume.*
+*Status: active output contract for Phase 1. The scanner builds this inventory in memory and can serialize it to terminal output; persistent file export is not implemented.*
 
 > An **Inventory** is the immutable snapshot produced by the scanner (`05-hw-scanner-spec.md`) and consumed by the manager and user interfaces (`04-driver-manager-spec.md`). This document is the canonical definition of its JSON representation.
 
@@ -14,7 +14,7 @@
 - **No absolute host-specific paths in the public `id`.** `id` values are logical identifiers such as `pci:0000:00:02.0` or `usb:1-4:1.0`. Absolute filesystem paths belong in the `path` field, never in `id`.
 - **Arrays may be empty.** Any array field (`devices`, `interfaces`, `modules`, `firmwares`, `package_suggestions`, `diagnosis`, `dependencies`, `sources`, `errors`, `paths`) may legitimately be empty `[]`. An empty array is not an error.
 - **An empty `package_suggestions` must be accompanied by a `PACKAGE_UNKNOWN` diagnosis.** If no backend can justify a package, the device's `diagnosis` array must contain a `PACKAGE_UNKNOWN` entry explaining the absence. Silence is not acceptable.
-- **Output-only schema.** This schema describes serialized **output** only. During the MVP the inventory is rendered to the **terminal**; the scanner writes no file, creates no cache and keeps audit events in memory. Exporting the inventory to a file requires separate authorization and is not part of this schema version's MVP behaviour. In phase 0 it is a specification only — no code writes or reads it yet. The first writer arrives with phase 1 discovery.
+- **Serialized output, no persistent export.** The scanner creates the inventory in memory and may serialize it to stdout as text or JSON. It does not write an inventory file, create a cache, or create temporary files. Persistent export is a separate future feature and is not part of Phase 1.
 
 ### 1.1 Enumerations (closed value sets)
 
@@ -80,8 +80,8 @@
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | string | Stable public identifier, e.g. `pci:0000:00:02.0`. Never an absolute path. |
-| `bus` | string | `"pci"`, `"usb"` or `"dt"` (device tree). |
+| `id` | string | Stable public identifier, e.g. `pci:0000:00:02.0`, `usb:1-4` or `dt:/soc/serial@1000`. Never an absolute path. |
+| `bus` | string | `"pci"`, `"usb"` or `"dt"` (Device Tree). |
 | `class` | object | Device class with `code` and `name` (see §6). |
 | `vendor` | object | Vendor with `id` and `name` (see §6). |
 | `device` | object | Device with `id` and `name` (see §6). |
