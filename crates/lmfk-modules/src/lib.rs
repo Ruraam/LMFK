@@ -127,7 +127,10 @@ impl ModuleIndex {
                 && !fields[0].is_empty()
                 && fields[1].parse::<u64>().is_ok()
                 && fields[2].parse::<u64>().is_ok()
-                && (fields[3] == "-" || fields[3].split(',').all(|name| !name.is_empty()))
+                && (fields[3] == "-" || {
+                    let users = fields[3].strip_suffix(',').unwrap_or(fields[3]);
+                    !users.is_empty() && users.split(',').all(|name| !name.is_empty())
+                })
                 && matches!(fields[4], "Live" | "Loading" | "Unloading")
                 && valid_address;
             if !valid_record {
@@ -441,7 +444,7 @@ mod tests {
     #[test]
     fn rejects_malformed_proc_modules_records() {
         let (loaded, issues) = ModuleIndex::parse_loaded(
-            "valid_module 4096 0 - Live 0x0000\\nnon_numeric nope 0 - Live 0x0\\nbad_state 4096 0 - Broken 0x0\\nbad_address 4096 0 - Live xyz",
+            "valid_module 4096 0 - Live 0x0000\nnon_numeric nope 0 - Live 0x0\nbad_state 4096 0 - Broken 0x0\nbad_address 4096 0 - Live xyz",
         );
         assert_eq!(loaded, BTreeSet::from(["valid_module".to_owned()]));
         assert_eq!(issues.len(), 3);
