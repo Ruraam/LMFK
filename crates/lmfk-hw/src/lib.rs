@@ -409,6 +409,7 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         device.parent = usb_parent(&name);
 
         let prefix = format!("{name}:");
+        record_source(sources, dir.display().to_string());
         match fs::read_dir(&dir) {
             Ok(children) => {
                 let mut names = Vec::new();
@@ -487,9 +488,9 @@ fn scan_device_tree(
         };
 
         let compatible_path = dir.join("compatible");
+        record_source(sources, compatible_path.display().to_string());
         match fs::read(&compatible_path) {
             Ok(bytes) => {
-                record_source(sources, compatible_path.display().to_string());
                 let compatibles: Vec<String> = bytes
                     .split(|byte| *byte == 0)
                     .filter(|part| !part.is_empty())
