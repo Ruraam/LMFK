@@ -498,12 +498,13 @@ fn scan_device_tree(
                     .filter(|value| !value.is_empty())
                     .collect();
                 if let Some(primary) = compatibles.first() {
-                    let id_path = if relative.is_empty() {
-                        "/".to_owned()
+                    // Public IDs are logical and path-free; preserve the
+                    // node hierarchy with ':' separators instead of '/'.
+                    let id = if relative.is_empty() {
+                        "dt:root".to_owned()
                     } else {
-                        format!("/{relative}")
+                        format!("dt:{}", relative.replace('/', ":"))
                     };
-                    let id = format!("dt:{id_path}");
                     let mut device = empty_device(id.clone(), Bus::Dt, &dir);
                     device.class.name = Category::Other.label().to_owned();
                     device.vendor.name = primary
@@ -518,9 +519,9 @@ fn scan_device_tree(
                             .and_then(|value| value.to_str())
                             .unwrap_or("");
                         Some(if parent.is_empty() {
-                            "dt:/".to_owned()
+                            "dt:root".to_owned()
                         } else {
-                            format!("dt:/{parent}")
+                            format!("dt:{}", parent.replace('/', ":"))
                         })
                     };
                     devices.push(device);
