@@ -2,7 +2,7 @@ name: LMFK CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, phase1-hardware-discovery]
   pull_request:
 
 jobs:
