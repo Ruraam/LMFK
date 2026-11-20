@@ -28,10 +28,7 @@ fn read_host_text(
     }
 }
 
-fn os_release_fields(
-    sources: &mut Vec<String>,
-    errors: &mut Vec<ScanError>,
-) -> (String, String) {
+fn os_release_fields(sources: &mut Vec<String>, errors: &mut Vec<ScanError>) -> (String, String) {
     let Some(content) = read_host_text("/etc/os-release", sources, errors) else {
         return ("unknown".to_owned(), "unknown".to_owned());
     };
@@ -50,10 +47,7 @@ fn os_release_fields(
     (id, version)
 }
 
-fn secure_boot_state(
-    sources: &mut Vec<String>,
-    errors: &mut Vec<ScanError>,
-) -> SecureBoot {
+fn secure_boot_state(sources: &mut Vec<String>, errors: &mut Vec<ScanError>) -> SecureBoot {
     let path = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c";
     sources.push(path.to_owned());
     match fs::read(path) {
