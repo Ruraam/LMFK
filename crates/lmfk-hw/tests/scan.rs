@@ -422,11 +422,11 @@ fn usb_present_but_invalid_attributes_are_errors() {
 #[test]
 fn malformed_hardware_ids_are_reported_instead_of_silently_discarded() {
     let fixture = Fixture::new("malformed-ids");
-    fixture.write("bus/pci/devices/0000:00:01.0/vendor", "0xGGGG\\n");
-    fixture.write("bus/pci/devices/0000:00:01.0/device", "0x12345\\n");
-    fixture.write("bus/pci/devices/0000:00:01.0/class", "0xZZ0000\\n");
-    fixture.write("bus/usb/devices/2-1/idVendor", "0xGGGG\\n");
-    fixture.write("bus/usb/devices/2-1/idProduct", "0x12345\\n");
+    fixture.write("bus/pci/devices/0000:00:01.0/vendor", "0xGGGG\n");
+    fixture.write("bus/pci/devices/0000:00:01.0/device", "0x12345\n");
+    fixture.write("bus/pci/devices/0000:00:01.0/class", "0xZZ0000\n");
+    fixture.write("bus/usb/devices/2-1/idVendor", "0xGGGG\n");
+    fixture.write("bus/usb/devices/2-1/idProduct", "0x12345\n");
 
     let inventory = scan_fixture(&fixture);
     let pci = inventory.devices.iter().find(|device| device.bus == lmfk_core::Bus::Pci).unwrap();
@@ -451,15 +451,15 @@ fn device_tree_compatible_nodes_are_discovered_read_only() {
     let fixture = Fixture::new("device-tree");
     fixture.write(
         "firmware/devicetree/base/compatible",
-        "acme,board\\0acme,board-rev2\\0",
+        "acme,board\0acme,board-rev2\0",
     );
     fixture.write(
         "firmware/devicetree/base/soc/compatible",
-        "simple-bus\\0",
+        "simple-bus\0",
     );
     fixture.write(
         "firmware/devicetree/base/soc/serial@1000/compatible",
-        "acme,uart-v2\\0",
+        "acme,uart-v2\0",
     );
 
     let before = fixture.snapshot();
