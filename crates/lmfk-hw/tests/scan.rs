@@ -483,10 +483,7 @@ fn device_tree_compatible_nodes_are_discovered_read_only() {
         "firmware/devicetree/base/compatible",
         "acme,board\0acme,board-rev2\0",
     );
-    fixture.write(
-        "firmware/devicetree/base/soc/compatible",
-        "simple-bus\0",
-    );
+    fixture.write("firmware/devicetree/base/soc/compatible", "simple-bus\0");
     fixture.write(
         "firmware/devicetree/base/soc/serial@1000/compatible",
         "acme,uart-v2\0",
