@@ -84,11 +84,24 @@ impl ModuleIndex {
                 });
                 continue;
             };
-            let dependencies = deps
-                .split_whitespace()
-                .filter_map(module_name_from_path)
-                .collect();
-            map.insert(module.clone(), dependencies);
+            let mut dependencies = Vec::new();
+            let mut malformed = false;
+            for encoded_path in deps.split_whitespace() {
+                let path = decode_dep_path(encoded_path);
+                match module_name_from_path(&path) {
+                    Some(dependency) => dependencies.push(dependency),
+                    None => {
+                        issues.push(ParseIssue {
+                            line: index + 1,
+                            message: format!("invalid dependency module path: {encoded_path}"),
+                        });
+                        malformed = true;
+                    }
+                }
+            }
+            if !malformed {
+                map.insert(module, dependencies);
+            }
         }
         (map, issues)
     }
@@ -130,6 +143,8 @@ impl ModuleIndex {
         issues.append(&mut builtin_issues);
         issues.append(&mut dependency_issues);
         issues.append(&mut loaded_issues);
+        // This is the set indexed by text modules.dep, not a complete
+        // filesystem inventory of every possible module file.
         let present = dependencies.keys().cloned().collect();
         (
             Self {
@@ -144,7 +159,9 @@ impl ModuleIndex {
     }
 
     /// Return matching module candidates for a device modalias and optional
-    /// bound-driver link. No package inference or installation is attempted.
+    /// bound-driver link. `Missing` means absent from the parsed text index,
+    /// not proof that no compatible module exists on the host. No package
+    /// inference or installation is attempted.
     pub fn resolve(&self, modalias: &str, bound_driver: Option<&str>) -> Vec<Module> {
         let mut candidates: BTreeMap<String, MatchSource> = BTreeMap::new();
 
@@ -241,8 +258,39 @@ fn parse_module_paths(input: &str) -> (BTreeSet<String>, Vec<ParseIssue>) {
 
 fn module_name_from_path(path: &str) -> Option<String> {
     let file = path.rsplit('/').next()?;
-    let stem = file.strip_suffix(".ko")?;
+    let uncompressed = [".xz", ".zst", ".gz"]
+        .iter()
+        .find_map(|suffix| file.strip_suffix(suffix))
+        .unwrap_or(file);
+    let stem = uncompressed.strip_suffix(".ko")?;
+    if stem.is_empty() || stem == "." || stem == ".." {
+        return None;
+    }
     Some(normalize_module_name(stem))
+}
+
+/// Decode escaped whitespace and backslashes emitted in modules.dep.
+/// Unknown escapes are preserved so malformed paths are reported, not guessed.
+fn decode_dep_path(path: &str) -> String {
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'\\' && index + 3 < bytes.len() && bytes[index + 1] == b'x' {
+            if let Ok(hex) = std::str::from_utf8(&bytes[index + 2..index + 4]) {
+                if let Ok(value) = u8::from_str_radix(hex, 16) {
+                    if matches!(value, b' ' | b'\t' | b'\\') {
+                        decoded.push(value);
+                        index += 4;
+                        continue;
+                    }
+                }
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
 }
 
 pub fn normalize_module_name(name: &str) -> String {
@@ -376,6 +424,36 @@ mod tests {
         assert_eq!(aliases.len(), 2);
         assert_eq!(deps.len(), 1);
         assert_eq!(loaded.len(), 1);
+    }
+
+    #[test]
+    fn parses_compressed_module_paths_and_escaped_dependency_paths() {
+        let (builtin, builtin_issues) = ModuleIndex::parse_builtin(
+            "kernel/drivers/net/foo-bar.ko.xz\nkernel/drivers/net/baz.ko.zst\nkernel/drivers/net/qux.ko.gz",
+        );
+        assert!(builtin_issues.is_empty(), "{builtin_issues:?}");
+        assert!(builtin.contains("foo_bar"));
+        assert!(builtin.contains("baz"));
+        assert!(builtin.contains("qux"));
+
+        let (dependencies, issues) = ModuleIndex::parse_dependencies(
+            "kernel/drivers/net/my\\x20driver.ko.xz: kernel/drivers/net/helper\\x20module.ko.zst",
+        );
+        assert!(issues.is_empty(), "{issues:?}");
+        assert_eq!(
+            dependencies.get("my driver"),
+            Some(&vec!["helper module".to_owned()])
+        );
+    }
+
+    #[test]
+    fn reports_invalid_dependency_paths_instead_of_dropping_them() {
+        let (dependencies, issues) = ModuleIndex::parse_dependencies(
+            "kernel/drivers/net/good.ko: kernel/drivers/net/valid.ko invalid.o",
+        );
+        assert!(dependencies.is_empty());
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].message.contains("invalid dependency module path"));
     }
 
     #[test]
