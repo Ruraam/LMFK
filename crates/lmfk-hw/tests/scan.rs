@@ -412,6 +412,69 @@ fn usb_present_but_invalid_attributes_are_errors() {
 }
 
 #[test]
+fn malformed_hardware_ids_are_reported_instead_of_silently_discarded() {
+    let fixture = Fixture::new("malformed-ids");
+    fixture.write("bus/pci/devices/0000:00:01.0/vendor", "0xGGGG\\n");
+    fixture.write("bus/pci/devices/0000:00:01.0/device", "0x12345\\n");
+    fixture.write("bus/pci/devices/0000:00:01.0/class", "0xZZ0000\\n");
+    fixture.write("bus/usb/devices/2-1/idVendor", "0xGGGG\\n");
+    fixture.write("bus/usb/devices/2-1/idProduct", "0x12345\\n");
+
+    let inventory = scan_fixture(&fixture);
+    let pci = inventory.devices.iter().find(|device| device.bus == lmfk_core::Bus::Pci).unwrap();
+    let usb = inventory.devices.iter().find(|device| device.bus == lmfk_core::Bus::Usb).unwrap();
+
+    assert_eq!(pci.vendor.id, "");
+    assert_eq!(pci.device.id, "");
+    assert_eq!(pci.class.code, "");
+    assert_eq!(usb.vendor.id, "");
+    assert_eq!(usb.device.id, "");
+    for field in ["vendor", "device", "class", "idVendor", "idProduct"] {
+        assert!(
+            inventory.scan.errors.iter().any(|error| error.message.contains(field)),
+            "missing invalid-value diagnostic for {field}: {:?}",
+            inventory.scan.errors
+        );
+    }
+}
+
+#[test]
+fn device_tree_compatible_nodes_are_discovered_read_only() {
+    let fixture = Fixture::new("device-tree");
+    fixture.write(
+        "firmware/devicetree/base/compatible",
+        "acme,board\\0acme,board-rev2\\0",
+    );
+    fixture.write(
+        "firmware/devicetree/base/soc/compatible",
+        "simple-bus\\0",
+    );
+    fixture.write(
+        "firmware/devicetree/base/soc/serial@1000/compatible",
+        "acme,uart-v2\\0",
+    );
+
+    let before = fixture.snapshot();
+    let inventory = scan_fixture(&fixture);
+    let after = fixture.snapshot();
+
+    assert_eq!(before, after, "Device Tree scan must not modify its fixture");
+    assert_eq!(inventory.devices.len(), 3);
+    let board = inventory.devices.iter().find(|device| device.id == "dt:/").unwrap();
+    assert_eq!(board.bus, lmfk_core::Bus::Dt);
+    assert_eq!(board.vendor.name, "acme");
+    assert_eq!(board.device.name, "acme,board");
+    assert!(board.parent.is_none());
+    let uart = inventory.devices
+        .iter()
+        .find(|device| device.id == "dt:/soc/serial@1000")
+        .unwrap();
+    assert_eq!(uart.parent.as_deref(), Some("dt:/soc"));
+    assert!(inventory.scan.sources.iter().any(|source| source.ends_with("/compatible")));
+    assert!(validate_json(&serde_json::to_value(inventory).unwrap()).is_ok());
+}
+
+#[test]
 fn json_matches_schema_v1() {
     let fixture = build_full_fixture();
     let inventory = scan_fixture(&fixture);
