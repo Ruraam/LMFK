@@ -75,7 +75,7 @@ fn read_optional(
     let path = dir.join(name);
     record_source(sources, path.display().to_string());
     match fs::read_to_string(&path) {
-        Ok(value) => Some(value.trim().to_owned())
+        Ok(value) => Some(value.trim().to_owned()),
         // A missing optional attribute is normal; any other access problem is
         // recorded instead of being silently treated as an absence.
         Err(error) if error.kind() == ErrorKind::NotFound => None,
@@ -358,7 +358,7 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
     let bus_root = root.join("bus/usb/devices");
     record_source(sources, bus_root.display().to_string());
     let entries = match fs::read_dir(&bus_root) {
-        Ok(entries) => entries
+        Ok(entries) => entries,
         Err(error) => {
             record_error(
                 errors,
