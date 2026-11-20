@@ -509,8 +509,12 @@ fn is_rfc3339_timestamp(value: &str) -> bool {
             .get(range)
             .is_some_and(|part| part.iter().all(u8::is_ascii_digit))
     };
-    if !digits(0..4) || !digits(5..7) || !digits(8..10)
-        || !digits(11..13) || !digits(14..16) || !digits(17..19)
+    if !digits(0..4)
+        || !digits(5..7)
+        || !digits(8..10)
+        || !digits(11..13)
+        || !digits(14..16)
+        || !digits(17..19)
     {
         return false;
     }
