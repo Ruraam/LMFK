@@ -425,6 +425,8 @@ fn malformed_hardware_ids_are_reported_instead_of_silently_discarded() {
     fixture.write("bus/pci/devices/0000:00:01.0/vendor", "0xGGGG\n");
     fixture.write("bus/pci/devices/0000:00:01.0/device", "0x12345\n");
     fixture.write("bus/pci/devices/0000:00:01.0/class", "0xZZ0000\n");
+    fixture.write("bus/pci/devices/0000:00:01.0/subsystem_vendor", "bad\n");
+    fixture.write("bus/pci/devices/0000:00:01.0/subsystem_device", "0x12345\n");
     fixture.write("bus/usb/devices/2-1/idVendor", "0xGGGG\n");
     fixture.write("bus/usb/devices/2-1/idProduct", "0x12345\n");
 
@@ -437,7 +439,15 @@ fn malformed_hardware_ids_are_reported_instead_of_silently_discarded() {
     assert_eq!(pci.class.code, "");
     assert_eq!(usb.vendor.id, "");
     assert_eq!(usb.device.id, "");
-    for field in ["vendor", "device", "class", "idVendor", "idProduct"] {
+    for field in [
+        "vendor",
+        "device",
+        "class",
+        "subsystem_vendor",
+        "subsystem_device",
+        "idVendor",
+        "idProduct",
+    ] {
         assert!(
             inventory.scan.errors.iter().any(|error| error.message.contains(field)),
             "missing invalid-value diagnostic for {field}: {:?}",
