@@ -52,9 +52,9 @@ fn read_required(
     errors: &mut Vec<ScanError>,
 ) -> Option<String> {
     let path = dir.join(name);
+    record_source(sources, path.display().to_string());
     match fs::read_to_string(&path) {
         Ok(value) => {
-            record_source(sources, path.display().to_string());
             Some(value.trim().to_owned())
         }
         Err(error) => {
@@ -75,9 +75,9 @@ fn read_optional(
     errors: &mut Vec<ScanError>,
 ) -> Option<String> {
     let path = dir.join(name);
+    record_source(sources, path.display().to_string());
     match fs::read_to_string(&path) {
         Ok(value) => {
-            record_source(sources, path.display().to_string());
             Some(value.trim().to_owned())
         }
         // A missing optional attribute is normal; any other access problem is
@@ -96,9 +96,9 @@ fn read_optional(
 
 fn read_driver(dir: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>) -> Driver {
     let path = dir.join("driver");
+    record_source(sources, path.display().to_string());
     match fs::read_link(&path) {
         Ok(target) => {
-            record_source(sources, path.display().to_string());
             match target.file_name().and_then(|name| name.to_str()) {
                 Some(name) => Driver {
                     bound: Some(name.to_owned()),
@@ -259,9 +259,9 @@ fn empty_device(id: String, bus: Bus, path: &Path) -> Device {
 
 fn scan_pci(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>) -> Vec<Device> {
     let bus_root = root.join("bus/pci/devices");
+    record_source(sources, bus_root.display().to_string());
     let entries = match fs::read_dir(&bus_root) {
         Ok(entries) => {
-            record_source(sources, bus_root.display().to_string());
             entries
         }
         Err(error) => {
@@ -351,9 +351,9 @@ fn scan_usb_interface(
 
 fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>) -> Vec<Device> {
     let bus_root = root.join("bus/usb/devices");
+    record_source(sources, bus_root.display().to_string());
     let entries = match fs::read_dir(&bus_root) {
         Ok(entries) => {
-            record_source(sources, bus_root.display().to_string());
             entries
         }
         Err(error) => {
@@ -467,9 +467,9 @@ fn scan_device_tree(
     let mut devices = Vec::new();
 
     while let Some((dir, relative)) = pending.pop() {
+        record_source(sources, dir.display().to_string());
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => {
-                record_source(sources, dir.display().to_string());
                 entries
             }
             Err(error) if error.kind() == ErrorKind::NotFound && relative.is_empty() => {
