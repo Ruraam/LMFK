@@ -77,7 +77,8 @@ impl ModuleIndex {
                 });
                 continue;
             };
-            let Some(module) = module_name_from_path(module_path) else {
+            let decoded_module_path = decode_dep_path(module_path);
+            let Some(module) = module_name_from_path(&decoded_module_path) else {
                 issues.push(ParseIssue {
                     line: index + 1,
                     message: "invalid module path".into(),
