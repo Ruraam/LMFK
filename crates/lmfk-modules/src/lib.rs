@@ -189,26 +189,6 @@ pub fn normalize_module_name(name: &str) -> String {
 /// Match the wildcard syntax used by modules.alias: '*', '?', and bracket
 /// character classes. Matching is byte-oriented because modaliases are ASCII.
 fn glob_match(pattern: &str, value: &str) -> bool {
-    fn inner(p: &[u8], v: &[u8], memo: &mut HashSet<(usize, usize)>) -> bool {
-        if !memo.insert((p.len(), v.len())) { return false; }
-        if p.is_empty() { return v.is_empty(); }
-        match p[0] {
-            b'*' => inner(&p[1..], v, memo) || (!v.is_empty() && inner(p, &v[1..], memo)),
-            b'?' => !v.is_empty() && inner(&p[1..], &v[1..], memo),
-            b'[' => {
-                let Some(end) = p.iter().position(|b| *b == b']') else {
-                    return !v.is_empty() && p[0] == v[0] && inner(&p[1..], &v[1..], memo);
-                };
-                if v.is_empty() || end == 1 { return false; }
-                let mut class = &p[1..end];
-                let negated = class.first().is_some_and(|b| *b == b'!' || *b == b'^');
-                if negated { class = &class[1..]; }
-                let matched = class_match(class, v[0]);
-                (matched != negated) && inner(&p[end + 1..], &v[1..], memo)
-            }
-            byte => !v.is_empty() && byte == v[0] && inner(&p[1..], &v[1..], memo),
-        }
-    }
     fn class_match(class: &[u8], byte: u8) -> bool {
         let mut i = 0;
         while i < class.len() {
@@ -222,7 +202,38 @@ fn glob_match(pattern: &str, value: &str) -> bool {
         }
         false
     }
-    inner(pattern.as_bytes(), value.as_bytes(), &mut HashSet::new())
+    fn visit(p: &[u8], v: &[u8], pi: usize, vi: usize, memo: &mut BTreeMap<(usize, usize), bool>) -> bool {
+        if let Some(result) = memo.get(&(pi, vi)) { return *result; }
+        let result = if pi == p.len() {
+            vi == v.len()
+        } else {
+            match p[pi] {
+                b'*' => visit(p, v, pi + 1, vi, memo)
+                    || (vi < v.len() && visit(p, v, pi, vi + 1, memo)),
+                b'?' => vi < v.len() && visit(p, v, pi + 1, vi + 1, memo),
+                b'[' => {
+                    let close = p[pi + 1..].iter().position(|b| *b == b']').map(|n| pi + 1 + n);
+                    if let Some(end) = close.filter(|end| *end > pi + 1) {
+                        if vi >= v.len() { false } else {
+                            let mut class = &p[pi + 1..end];
+                            let negated = class.first().is_some_and(|b| *b == b'!' || *b == b'^');
+                            if negated { class = &class[1..]; }
+                            class_match(class, v[vi]) != negated
+                                && visit(p, v, end + 1, vi + 1, memo)
+                        }
+                    } else {
+                        vi < v.len() && p[pi] == v[vi]
+                            && visit(p, v, pi + 1, vi + 1, memo)
+                    }
+                }
+                byte => vi < v.len() && byte == v[vi]
+                    && visit(p, v, pi + 1, vi + 1, memo),
+            }
+        };
+        memo.insert((pi, vi), result);
+        result
+    }
+    visit(pattern.as_bytes(), value.as_bytes(), 0, 0, &mut BTreeMap::new())
 }
 
 #[cfg(test)]
