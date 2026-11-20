@@ -10,6 +10,7 @@ members = [
     "tools/drvpack",
     "crates/lmfk-core",
     "crates/lmfk-hw",
+    "crates/lmfk-modules",
     "tools/lmfk",
 ]
 
