@@ -42,7 +42,10 @@ impl ModuleIndex {
             }
             let fields: Vec<_> = line.split_whitespace().collect();
             if fields.len() != 3 || fields[0] != "alias" {
-                issues.push(ParseIssue { line: index + 1, message: "expected: alias <modalias-pattern> <module>".into() });
+                issues.push(ParseIssue {
+                    line: index + 1,
+                    message: "expected: alias <modalias-pattern> <module>".into(),
+                });
                 continue;
             }
             aliases.push(ModuleAlias {
@@ -64,16 +67,27 @@ impl ModuleIndex {
         let mut issues = Vec::new();
         for (index, raw) in input.lines().enumerate() {
             let line = raw.trim();
-            if line.is_empty() || line.starts_with('#') { continue; }
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
             let Some((module_path, deps)) = line.split_once(':') else {
-                issues.push(ParseIssue { line: index + 1, message: "missing ':' separator in modules.dep entry".into() });
+                issues.push(ParseIssue {
+                    line: index + 1,
+                    message: "missing ':' separator in modules.dep entry".into(),
+                });
                 continue;
             };
             let Some(module) = module_name_from_path(module_path) else {
-                issues.push(ParseIssue { line: index + 1, message: "invalid module path".into() });
+                issues.push(ParseIssue {
+                    line: index + 1,
+                    message: "invalid module path".into(),
+                });
                 continue;
             };
-            let dependencies = deps.split_whitespace().filter_map(module_name_from_path).collect();
+            let dependencies = deps
+                .split_whitespace()
+                .filter_map(module_name_from_path)
+                .collect();
             map.insert(module.clone(), dependencies);
         }
         (map, issues)
@@ -85,10 +99,17 @@ impl ModuleIndex {
         let mut issues = Vec::new();
         for (index, raw) in input.lines().enumerate() {
             let line = raw.trim();
-            if line.is_empty() { continue; }
-            let Some(name) = line.split_whitespace().next() else { continue; };
+            if line.is_empty() {
+                continue;
+            }
+            let Some(name) = line.split_whitespace().next() else {
+                continue;
+            };
             if line.split_whitespace().count() < 6 {
-                issues.push(ParseIssue { line: index + 1, message: "incomplete /proc/modules record".into() });
+                issues.push(ParseIssue {
+                    line: index + 1,
+                    message: "incomplete /proc/modules record".into(),
+                });
                 continue;
             }
             loaded.insert(normalize_module_name(name));
@@ -96,7 +117,12 @@ impl ModuleIndex {
         (loaded, issues)
     }
 
-    pub fn from_metadata(aliases: &str, builtin: &str, dependencies: &str, loaded: &str) -> (Self, Vec<ParseIssue>) {
+    pub fn from_metadata(
+        aliases: &str,
+        builtin: &str,
+        dependencies: &str,
+        loaded: &str,
+    ) -> (Self, Vec<ParseIssue>) {
         let (aliases, mut issues) = Self::parse_aliases(aliases);
         let (builtin, mut builtin_issues) = Self::parse_builtin(builtin);
         let (dependencies, mut dependency_issues) = Self::parse_dependencies(dependencies);
@@ -105,7 +131,10 @@ impl ModuleIndex {
         issues.append(&mut dependency_issues);
         issues.append(&mut loaded_issues);
         let present = dependencies.keys().cloned().collect();
-        (Self { aliases, builtin, present, dependencies, loaded }, issues)
+        (
+            Self { aliases, builtin, present, dependencies, loaded },
+            issues,
+        )
     }
 
     /// Return matching module candidates for a device modalias and optional
@@ -116,16 +145,22 @@ impl ModuleIndex {
         if !modalias.is_empty() {
             for alias in &self.aliases {
                 if glob_match(&alias.pattern, modalias) {
-                    candidates.entry(alias.module.clone()).or_insert(MatchSource::ModulesAlias);
+                    candidates
+                        .entry(alias.module.clone())
+                        .or_insert(MatchSource::ModulesAlias);
                 }
             }
         }
 
         if let Some(driver) = bound_driver.filter(|name| !name.trim().is_empty()) {
-            candidates.entry(normalize_module_name(driver)).or_insert(MatchSource::DriverLink);
+            candidates
+                .entry(normalize_module_name(driver))
+                .or_insert(MatchSource::DriverLink);
         }
 
-        candidates.into_iter().map(|(name, source)| {
+        candidates
+            .into_iter()
+            .map(|(name, source)| {
             let state = if self.loaded.contains(&name) {
                 ModuleState::Loaded
             } else if self.builtin.contains(&name) {
@@ -137,9 +172,20 @@ impl ModuleIndex {
             } else {
                 ModuleState::Missing
             };
-            let dependencies = self.dependencies.get(&name).cloned().unwrap_or_default();
-            Module { name, match_source: source, state, dependencies, firmwares: Vec::new() }
-        }).collect()
+            let dependencies = self
+                    .dependencies
+                    .get(&name)
+                    .cloned()
+                    .unwrap_or_default();
+            Module {
+                    name,
+                    match_source: source,
+                    state,
+                    dependencies,
+                    firmwares: Vec::new(),
+                }
+                    })
+            .collect()
     }
 
     /// Return a stable, de-duplicated transitive dependency list. Cycles are
@@ -149,7 +195,9 @@ impl ModuleIndex {
         let mut visited = BTreeSet::new();
         let mut pending = self.dependencies.get(&root).cloned().unwrap_or_default();
         while let Some(name) = pending.pop() {
-            if name == root || !visited.insert(name.clone()) { continue; }
+            if name == root || !visited.insert(name.clone()) {
+                continue;
+            }
             if let Some(children) = self.dependencies.get(&name) {
                 pending.extend(children.iter().cloned());
             }
@@ -157,9 +205,15 @@ impl ModuleIndex {
         visited.into_iter().collect()
     }
 
-    pub fn is_builtin(&self, module: &str) -> bool { self.builtin.contains(&normalize_module_name(module)) }
-    pub fn is_loaded(&self, module: &str) -> bool { self.loaded.contains(&normalize_module_name(module)) }
-    pub fn is_present(&self, module: &str) -> bool { self.present.contains(&normalize_module_name(module)) }
+    pub fn is_builtin(&self, module: &str) -> bool {
+        self.builtin.contains(&normalize_module_name(module))
+    }
+    pub fn is_loaded(&self, module: &str) -> bool {
+        self.loaded.contains(&normalize_module_name(module))
+    }
+    pub fn is_present(&self, module: &str) -> bool {
+        self.present.contains(&normalize_module_name(module))
+    }
 }
 
 fn parse_module_paths(input: &str) -> (BTreeSet<String>, Vec<ParseIssue>) {
@@ -167,10 +221,17 @@ fn parse_module_paths(input: &str) -> (BTreeSet<String>, Vec<ParseIssue>) {
     let mut issues = Vec::new();
     for (index, raw) in input.lines().enumerate() {
         let path = raw.trim();
-        if path.is_empty() || path.starts_with('#') { continue; }
+        if path.is_empty() || path.starts_with('#') {
+            continue;
+        }
         match module_name_from_path(path) {
-            Some(name) => { names.insert(name); }
-            None => issues.push(ParseIssue { line: index + 1, message: "invalid module path".into() }),
+            Some(name) => {
+                names.insert(name);
+            }
+            None => issues.push(ParseIssue {
+                line: index + 1,
+                message: "invalid module path".into(),
+            }),
         }
     }
     (names, issues)
@@ -193,47 +254,72 @@ fn glob_match(pattern: &str, value: &str) -> bool {
         let mut i = 0;
         while i < class.len() {
             if i + 2 < class.len() && class[i + 1] == b'-' {
-                if (class[i]..=class[i + 2]).contains(&byte) { return true; }
+                if (class[i]..=class[i + 2]).contains(&byte) {
+                    return true;
+                }
                 i += 3;
             } else {
-                if class[i] == byte { return true; }
+                if class[i] == byte {
+                    return true;
+                }
                 i += 1;
             }
         }
         false
     }
-    fn visit(p: &[u8], v: &[u8], pi: usize, vi: usize, memo: &mut BTreeMap<(usize, usize), bool>) -> bool {
-        if let Some(result) = memo.get(&(pi, vi)) { return *result; }
+    fn visit(
+        p: &[u8],
+        v: &[u8],
+        pi: usize,
+        vi: usize,
+        memo: &mut BTreeMap<(usize, usize), bool>,
+    ) -> bool {
+        if let Some(result) = memo.get(&(pi, vi)) {
+            return *result;
+        }
         let result = if pi == p.len() {
             vi == v.len()
         } else {
             match p[pi] {
-                b'*' => visit(p, v, pi + 1, vi, memo)
-                    || (vi < v.len() && visit(p, v, pi, vi + 1, memo)),
+                b'*' => {
+                    visit(p, v, pi + 1, vi, memo)
+                        || (vi < v.len() && visit(p, v, pi, vi + 1, memo))
+                }
                 b'?' => vi < v.len() && visit(p, v, pi + 1, vi + 1, memo),
                 b'[' => {
-                    let close = p[pi + 1..].iter().position(|b| *b == b']').map(|n| pi + 1 + n);
+                    let close = p[pi + 1..]
+                        .iter()
+                        .position(|b| *b == b']')
+                        .map(|n| pi + 1 + n);
                     if let Some(end) = close.filter(|end| *end > pi + 1) {
-                        if vi >= v.len() { false } else {
+                        if vi >= v.len() {
+                            false
+                        } else {
                             let mut class = &p[pi + 1..end];
                             let negated = class.first().is_some_and(|b| *b == b'!' || *b == b'^');
-                            if negated { class = &class[1..]; }
+                            if negated {
+                                class = &class[1..];
+                            }
                             class_match(class, v[vi]) != negated
                                 && visit(p, v, end + 1, vi + 1, memo)
                         }
                     } else {
-                        vi < v.len() && p[pi] == v[vi]
-                            && visit(p, v, pi + 1, vi + 1, memo)
+                        vi < v.len() && p[pi] == v[vi] && visit(p, v, pi + 1, vi + 1, memo)
                     }
                 }
-                byte => vi < v.len() && byte == v[vi]
-                    && visit(p, v, pi + 1, vi + 1, memo),
+                byte => vi < v.len() && byte == v[vi] && visit(p, v, pi + 1, vi + 1, memo),
             }
         };
         memo.insert((pi, vi), result);
         result
     }
-    visit(pattern.as_bytes(), value.as_bytes(), 0, 0, &mut BTreeMap::new())
+    visit(
+        pattern.as_bytes(),
+        value.as_bytes(),
+        0,
+        0,
+        &mut BTreeMap::new(),
+    )
 }
 
 #[cfg(test)]
@@ -241,9 +327,11 @@ mod tests {
     use super::*;
 
     const ALIASES: &str = "alias pci:v00008086d0000157Bsv*bc02sc*ig* e1000e\nalias usb:v0BDAp8812d*dc*dsc*dp*ic*isc*ip* rtl88xxau\nalias pci:v0000AB[0-9]0d* test_driver";
-    const BUILTIN: &str = "kernel/drivers/net/ethernet/intel/e1000e.ko\nkernel/drivers/base/foo-bar.ko";
+    const BUILTIN: &str =
+        "kernel/drivers/net/ethernet/intel/e1000e.ko\nkernel/drivers/base/foo-bar.ko";
     const DEP: &str = "kernel/drivers/net/ethernet/intel/e1000e.ko: kernel/drivers/net/ethernet/libphy.ko\nkernel/drivers/net/ethernet/libphy.ko:\nkernel/drivers/base/foo-bar.ko:";
-    const PROC: &str = "e1000e 245760 0 - Live 0xffffffffc0000000\nlibphy 16384 1 e1000e, Live 0xffffffffc0001000";
+    const PROC: &str =
+        "e1000e 245760 0 - Live 0xffffffffc0000000\nlibphy 16384 1 e1000e, Live 0xffffffffc0001000";
 
     #[test]
     fn parses_all_metadata_sources_and_normalizes_names() {
@@ -259,7 +347,10 @@ mod tests {
     fn resolves_loaded_builtin_available_and_missing_states() {
         let (index, issues) = ModuleIndex::from_metadata(ALIASES, BUILTIN, DEP, PROC);
         assert!(issues.is_empty());
-        let pci = index.resolve("pci:v00008086d0000157Bsv00008086sd00000000bc02sc00i00", None);
+        let pci = index.resolve(
+            "pci:v00008086d0000157Bsv00008086sd00000000bc02sc00i00",
+            None,
+        );
         assert_eq!(pci.len(), 1);
         assert_eq!(pci[0].name, "e1000e");
         assert_eq!(pci[0].state, ModuleState::Loaded);
