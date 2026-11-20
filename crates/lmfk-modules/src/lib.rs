@@ -116,17 +116,28 @@ impl ModuleIndex {
             if line.is_empty() {
                 continue;
             }
-            let Some(name) = line.split_whitespace().next() else {
-                continue;
-            };
-            if line.split_whitespace().count() < 6 {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            let valid_address = fields.get(5).is_some_and(|address| {
+                *address == "0"
+                    || address
+                        .strip_prefix("0x")
+                        .is_some_and(|hex| !hex.is_empty() && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+            });
+            let valid_record = fields.len() == 6
+                && !fields[0].is_empty()
+                && fields[1].parse::<u64>().is_ok()
+                && fields[2].parse::<u64>().is_ok()
+                && (fields[3] == "-" || fields[3].split(',').all(|name| !name.is_empty()))
+                && matches!(fields[4], "Live" | "Loading" | "Unloading")
+                && valid_address;
+            if !valid_record {
                 issues.push(ParseIssue {
                     line: index + 1,
-                    message: "incomplete /proc/modules record".into(),
+                    message: "invalid /proc/modules record (expected name, size, refcount, users, state, address)".into(),
                 });
                 continue;
             }
-            loaded.insert(normalize_module_name(name));
+            loaded.insert(normalize_module_name(fields[0]));
         }
         (loaded, issues)
     }
@@ -428,6 +439,15 @@ mod tests {
     }
 
     #[test]
+    fn rejects_malformed_proc_modules_records() {
+        let (loaded, issues) = ModuleIndex::parse_loaded(
+            "valid_module 4096 0 - Live 0x0000\\nnon_numeric nope 0 - Live 0x0\\nbad_state 4096 0 - Broken 0x0\\nbad_address 4096 0 - Live xyz",
+        );
+        assert_eq!(loaded, BTreeSet::from(["valid_module".to_owned()]));
+        assert_eq!(issues.len(), 3);
+    }
+
+    #[test]
     fn parses_compressed_module_paths_and_escaped_dependency_paths() {
         let (builtin, builtin_issues) = ModuleIndex::parse_builtin(
             "kernel/drivers/net/foo-bar.ko.xz\nkernel/drivers/net/baz.ko.zst\nkernel/drivers/net/qux.ko.gz",
@@ -462,5 +482,10 @@ mod tests {
         assert!(glob_match("pci:v0000AB[0-9]0d*", "pci:v0000AB70d123"));
         assert!(glob_match("usb:v*ic?isc[0-3]if*", "usb:v123ic1isc2if00"));
         assert!(!glob_match("usb:v*ic?isc[0-3]if*", "usb:v123ic1isc9if00"));
+        assert!(glob_match("pci:v0000AB[!0-6]0d*", "pci:v0000AB70d123"));
+        assert!(glob_match("pci:v0000AB[^0-6]0d*", "pci:v0000AB90d123"));
+        assert!(!glob_match("pci:v0000AB[!0-6]0d*", "pci:v0000AB30d123"));
+        assert!(!glob_match("pci:v0000AB[9-2]0d*", "pci:v0000AB50d123"));
+        assert!(glob_match("pci:v0000AB[0-6", "pci:v0000AB[0-6"));
     }
 }
