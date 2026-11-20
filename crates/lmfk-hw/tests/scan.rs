@@ -431,8 +431,16 @@ fn malformed_hardware_ids_are_reported_instead_of_silently_discarded() {
     fixture.write("bus/usb/devices/2-1/idProduct", "0x12345\n");
 
     let inventory = scan_fixture(&fixture);
-    let pci = inventory.devices.iter().find(|device| device.bus == lmfk_core::Bus::Pci).unwrap();
-    let usb = inventory.devices.iter().find(|device| device.bus == lmfk_core::Bus::Usb).unwrap();
+    let pci = inventory
+        .devices
+        .iter()
+        .find(|device| device.bus == lmfk_core::Bus::Pci)
+        .unwrap();
+    let usb = inventory
+        .devices
+        .iter()
+        .find(|device| device.bus == lmfk_core::Bus::Usb)
+        .unwrap();
 
     assert_eq!(pci.vendor.id, "");
     assert_eq!(pci.device.id, "");
@@ -449,7 +457,11 @@ fn malformed_hardware_ids_are_reported_instead_of_silently_discarded() {
         "idProduct",
     ] {
         assert!(
-            inventory.scan.errors.iter().any(|error| error.message.contains(field)),
+            inventory
+                .scan
+                .errors
+                .iter()
+                .any(|error| error.message.contains(field)),
             "missing invalid-value diagnostic for {field}: {:?}",
             inventory.scan.errors
         );
@@ -478,17 +490,28 @@ fn device_tree_compatible_nodes_are_discovered_read_only() {
 
     assert_eq!(before, after, "Device Tree scan must not modify its fixture");
     assert_eq!(inventory.devices.len(), 3);
-    let board = inventory.devices.iter().find(|device| device.id == "dt:root").unwrap();
+    let board = inventory
+        .devices
+        .iter()
+        .find(|device| device.id == "dt:root")
+        .unwrap();
     assert_eq!(board.bus, lmfk_core::Bus::Dt);
     assert_eq!(board.vendor.name, "acme");
     assert_eq!(board.device.name, "acme,board");
     assert!(board.parent.is_none());
-    let uart = inventory.devices
+    let uart = inventory
+        .devices
         .iter()
         .find(|device| device.id == "dt:soc:serial@1000")
         .unwrap();
     assert_eq!(uart.parent.as_deref(), Some("dt:soc"));
-    assert!(inventory.scan.sources.iter().any(|source| source.ends_with("/compatible")));
+    assert!(
+        inventory
+            .scan
+            .sources
+            .iter()
+            .any(|source| source.ends_with("/compatible"))
+    );
     assert!(validate_json(&serde_json::to_value(inventory).unwrap()).is_ok());
 }
 
