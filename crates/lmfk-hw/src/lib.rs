@@ -119,14 +119,25 @@ fn read_driver(dir: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError
     }
 }
 
-fn parse_hex_id(raw: Option<String>, width: usize) -> Option<String> {
+fn parse_hex_id(
+    raw: Option<String>,
+    width: usize,
+    source: &Path,
+    field: &str,
+    errors: &mut Vec<ScanError>,
+) -> Option<String> {
     let raw = raw?;
-    let digits = raw.trim().trim_start_matches("0x").trim_start_matches("0X");
-    if digits.is_empty() {
+    let digits = raw.trim().strip_prefix("0x").or_else(|| raw.trim().strip_prefix("0X"))
+        .unwrap_or(raw.trim());
+    if digits.len() != width || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        record_error(
+            errors,
+            source.join(field).display().to_string(),
+            format!("invalid hexadecimal {field} value: {raw}"),
+        );
         return None;
     }
-    let value = u64::from_str_radix(digits, 16).ok()?;
-    Some(format!("0x{value:0width$x}"))
+    Some(format!("0x{}", digits.to_ascii_lowercase()))
 }
 
 fn clean_modalias(raw: Option<String>, source: &Path, errors: &mut Vec<ScanError>) -> String {
@@ -170,7 +181,7 @@ fn parse_usb_class(
     errors: &mut Vec<ScanError>,
 ) -> Option<String> {
     let raw = raw?;
-    match parse_hex_id(Some(raw.clone()), 2) {
+    match parse_hex_id(Some(raw.clone()), 2, source, "USB class", errors) {
         Some(value) => Some(value),
         None => {
             record_error(
@@ -291,17 +302,21 @@ fn scan_pci(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         let device_id = read_required(&dir, "device", sources, errors);
         let class = read_required(&dir, "class", sources, errors);
         let modalias = read_required(&dir, "modalias", sources, errors);
-        device.vendor.id = parse_hex_id(vendor, 4).unwrap_or_default();
-        device.device.id = parse_hex_id(device_id, 4).unwrap_or_default();
-        device.class.code = parse_hex_id(class, 6).unwrap_or_default();
+        device.vendor.id = parse_hex_id(vendor, 4, &dir, "vendor", errors).unwrap_or_default();
+        device.device.id = parse_hex_id(device_id, 4, &dir, "device", errors).unwrap_or_default();
+        device.class.code = parse_hex_id(class, 6, &dir, "class", errors).unwrap_or_default();
         device.modalias = clean_modalias(modalias, &dir, errors);
         device.class.name = classify_pci(&device.class.code).label().to_owned();
         device.subsystem.vendor =
-            parse_hex_id(read_optional(&dir, "subsystem_vendor", sources, errors), 4)
-                .unwrap_or_default();
+            parse_hex_id(
+                read_optional(&dir, "subsystem_vendor", sources, errors),
+                4, &dir, "subsystem_vendor", errors,
+            ).unwrap_or_default();
         device.subsystem.device =
-            parse_hex_id(read_optional(&dir, "subsystem_device", sources, errors), 4)
-                .unwrap_or_default();
+            parse_hex_id(
+                read_optional(&dir, "subsystem_device", sources, errors),
+                4, &dir, "subsystem_device", errors,
+            ).unwrap_or_default();
         device.driver = read_driver(&dir, sources, errors);
         device.parent = pci_parent(root, &dir);
         devices.push(device);
@@ -389,9 +404,9 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         // category is assigned to each interface using its interface class.
         device.class.name = Category::Usb.label().to_owned();
         device.vendor.id =
-            parse_hex_id(read_required(&dir, "idVendor", sources, errors), 4).unwrap_or_default();
+            parse_hex_id(read_required(&dir, "idVendor", sources, errors), 4, &dir, "idVendor", errors).unwrap_or_default();
         device.device.id =
-            parse_hex_id(read_required(&dir, "idProduct", sources, errors), 4).unwrap_or_default();
+            parse_hex_id(read_required(&dir, "idProduct", sources, errors), 4, &dir, "idProduct", errors).unwrap_or_default();
         device.modalias = clean_modalias(
             read_optional(&dir, "modalias", sources, errors),
             &dir,
