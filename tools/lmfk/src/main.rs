@@ -7,48 +7,96 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use lmfk_core::{Host, Inventory, SecureBoot};
+use lmfk_core::{Host, Inventory, ScanError, SecureBoot};
 use lmfk_hw::{ScanOptions, scan};
 
-fn read_small(path: &str) -> String {
-    fs::read_to_string(path)
-        .map(|value| value.trim().to_owned())
-        .unwrap_or_else(|_| "unknown".to_owned())
+fn read_host_text(
+    path: &str,
+    sources: &mut Vec<String>,
+    errors: &mut Vec<ScanError>,
+) -> Option<String> {
+    sources.push(path.to_owned());
+    match fs::read_to_string(path) {
+        Ok(value) => Some(value.trim().to_owned()),
+        Err(error) => {
+            errors.push(ScanError {
+                source: path.to_owned(),
+                message: format!("cannot read host metadata: {error}"),
+            });
+            None
+        }
+    }
 }
 
-fn os_release_field(field: &str) -> String {
-    let content = fs::read_to_string("/etc/os-release").unwrap_or_default();
+fn os_release_fields(
+    sources: &mut Vec<String>,
+    errors: &mut Vec<ScanError>,
+) -> (String, String) {
+    let Some(content) = read_host_text("/etc/os-release", sources, errors) else {
+        return ("unknown".to_owned(), "unknown".to_owned());
+    };
+    let mut id = "unknown".to_owned();
+    let mut version = "unknown".to_owned();
     for line in content.lines() {
         if let Some((key, value)) = line.split_once('=') {
-            if key == field {
-                return value.trim().trim_matches('"').to_owned();
+            let value = value.trim().trim_matches('"').to_owned();
+            match key {
+                "ID" => id = value,
+                "VERSION_ID" => version = value,
+                _ => {}
             }
         }
     }
-    "unknown".to_owned()
+    (id, version)
 }
 
-fn secure_boot_state() -> SecureBoot {
+fn secure_boot_state(
+    sources: &mut Vec<String>,
+    errors: &mut Vec<ScanError>,
+) -> SecureBoot {
     let path = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c";
+    sources.push(path.to_owned());
     match fs::read(path) {
         Ok(bytes) => match bytes.last() {
             Some(1) => SecureBoot::Enabled,
             Some(0) => SecureBoot::Disabled,
-            _ => SecureBoot::Unknown,
+            _ => {
+                errors.push(ScanError {
+                    source: path.to_owned(),
+                    message: "Secure Boot variable has an invalid payload".to_owned(),
+                });
+                SecureBoot::Unknown
+            }
         },
-        Err(_) => SecureBoot::Unknown,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => SecureBoot::Unknown,
+        Err(error) => {
+            errors.push(ScanError {
+                source: path.to_owned(),
+                message: format!("cannot read Secure Boot state: {error}"),
+            });
+            SecureBoot::Unknown
+        }
     }
 }
 
-fn host_info() -> Host {
-    Host {
-        kernel_release: read_small("/proc/sys/kernel/osrelease"),
-        kernel_version: read_small("/proc/version"),
+fn host_info() -> (Host, Vec<String>, Vec<ScanError>) {
+    let mut sources = Vec::new();
+    let mut errors = Vec::new();
+    let kernel_release = read_host_text("/proc/sys/kernel/osrelease", &mut sources, &mut errors)
+        .unwrap_or_else(|| "unknown".to_owned());
+    let kernel_version = read_host_text("/proc/version", &mut sources, &mut errors)
+        .unwrap_or_else(|| "unknown".to_owned());
+    let (distro_id, distro_version) = os_release_fields(&mut sources, &mut errors);
+    let secure_boot = secure_boot_state(&mut sources, &mut errors);
+    let host = Host {
+        kernel_release,
+        kernel_version,
         arch: std::env::consts::ARCH.to_owned(),
-        distro_id: os_release_field("ID"),
-        distro_version: os_release_field("VERSION_ID"),
-        secure_boot: secure_boot_state(),
-    }
+        distro_id,
+        distro_version,
+        secure_boot,
+    };
+    (host, sources, errors)
 }
 
 /// Minimal UTC RFC 3339 formatter; avoids a date dependency for a single field.
@@ -179,8 +227,14 @@ fn main() -> ExitCode {
     }
 
     let root: PathBuf = Path::new("/sys").to_path_buf();
-    let options = ScanOptions::new(&root, host_info(), rfc3339_now());
-    let inventory = scan(&options);
+    let (host, host_sources, host_errors) = host_info();
+    let options = ScanOptions::new(&root, host, rfc3339_now());
+    let mut inventory = scan(&options);
+    inventory.scan.sources.extend(host_sources);
+    inventory.scan.sources.sort();
+    inventory.scan.sources.dedup();
+    inventory.scan.errors.extend(host_errors);
+    inventory.summary.errors = inventory.scan.errors.len();
 
     let output = if format == "json" {
         match inventory.to_json_pretty() {
