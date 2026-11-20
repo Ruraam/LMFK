@@ -1,0 +1,13 @@
+[package]
+name = "lmfk-modules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Read-only Linux kernel module metadata discovery for LMFK"
+
+[dependencies]
+lmfk-core = { path = "../lmfk-core" }
+
+[dev-dependencies]
