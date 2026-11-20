@@ -327,7 +327,7 @@ fn glob_match(pattern: &str, value: &str) -> bool {
 mod tests {
     use super::*;
 
-    const ALIASES: &str = "alias pci:v00008086d0000157Bsv*bc02sc*ig* e1000e\nalias usb:v0BDAp8812d*dc*dsc*dp*ic*isc*ip* rtl88xxau\nalias pci:v0000AB[0-9]0d* test_driver";
+    const ALIASES: &str = "alias pci:v00008086d0000157Bsv*bc02sc*i* e1000e\nalias usb:v0BDAp8812d*dc*dsc*dp*ic*isc*ip* rtl88xxau\nalias pci:v0000AB[0-9]0d* test_driver";
     const BUILTIN: &str =
         "kernel/drivers/net/ethernet/intel/e1000e.ko\nkernel/drivers/base/foo-bar.ko";
     const DEP: &str = "kernel/drivers/net/ethernet/intel/e1000e.ko: kernel/drivers/net/ethernet/libphy.ko\nkernel/drivers/net/ethernet/libphy.ko:\nkernel/drivers/base/foo-bar.ko:";
