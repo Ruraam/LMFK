@@ -378,11 +378,19 @@ fn usb_absent_optional_attributes_are_not_errors() {
     assert_eq!(device.diagnosis.len(), 1);
     assert_eq!(device.diagnosis[0].code, "PACKAGE_UNKNOWN");
     assert!(
-        inventory.scan.sources.iter().any(|source| source.ends_with("/bDeviceClass")),
+        inventory
+            .scan
+            .sources
+            .iter()
+            .any(|source| source.ends_with("/bDeviceClass")),
         "missing optional attributes must still be auditable"
     );
     assert!(
-        inventory.scan.sources.iter().any(|source| source.ends_with("/driver")),
+        inventory
+            .scan
+            .sources
+            .iter()
+            .any(|source| source.ends_with("/driver")),
         "absent driver links must still be auditable"
     );
     assert!(validate_json(&serde_json::to_value(inventory).unwrap()).is_ok());
@@ -488,7 +496,10 @@ fn device_tree_compatible_nodes_are_discovered_read_only() {
     let inventory = scan_fixture(&fixture);
     let after = fixture.snapshot();
 
-    assert_eq!(before, after, "Device Tree scan must not modify its fixture");
+    assert_eq!(
+        before, after,
+        "Device Tree scan must not modify its fixture"
+    );
     assert_eq!(inventory.devices.len(), 3);
     let board = inventory
         .devices
