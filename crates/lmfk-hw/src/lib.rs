@@ -54,9 +54,7 @@ fn read_required(
     let path = dir.join(name);
     record_source(sources, path.display().to_string());
     match fs::read_to_string(&path) {
-        Ok(value) => {
-            Some(value.trim().to_owned())
-        }
+        Ok(value) => Some(value.trim().to_owned()),
         Err(error) => {
             record_error(
                 errors,
@@ -98,15 +96,13 @@ fn read_driver(dir: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError
     let path = dir.join("driver");
     record_source(sources, path.display().to_string());
     match fs::read_link(&path) {
-        Ok(target) => {
-            match target.file_name().and_then(|name| name.to_str()) {
-                Some(name) => Driver {
-                    bound: Some(name.to_owned()),
-                    state: DriverState::Bound,
-                },
-                None => Driver::unknown(),
-            }
-        }
+        Ok(target) => match target.file_name().and_then(|name| name.to_str()) {
+            Some(name) => Driver {
+                bound: Some(name.to_owned()),
+                state: DriverState::Bound,
+            },
+            None => Driver::unknown(),
+        },
         Err(error) if error.kind() == ErrorKind::NotFound => Driver::unbound(),
         Err(error) => {
             record_error(
@@ -188,13 +184,7 @@ fn parse_usb_class(
     attribute: &str,
     errors: &mut Vec<ScanError>,
 ) -> Option<String> {
-    parse_hex_id(
-        raw,
-        2,
-        &dir.join(attribute),
-        "USB class",
-        errors,
-    )
+    parse_hex_id(raw, 2, &dir.join(attribute), "USB class", errors)
 }
 
 fn classify_usb_interface(code: Option<String>) -> Category {
@@ -271,9 +261,7 @@ fn scan_pci(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
     let bus_root = root.join("bus/pci/devices");
     record_source(sources, bus_root.display().to_string());
     let entries = match fs::read_dir(&bus_root) {
-        Ok(entries) => {
-            entries
-        }
+        Ok(entries) => entries,
         Err(error) => {
             record_error(
                 errors,
@@ -305,30 +293,12 @@ fn scan_pci(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         let device_id = read_required(&dir, "device", sources, errors);
         let class = read_required(&dir, "class", sources, errors);
         let modalias = read_required(&dir, "modalias", sources, errors);
-        device.vendor.id = parse_hex_id(
-            vendor,
-            4,
-            &dir.join("vendor"),
-            "vendor",
-            errors,
-        )
-        .unwrap_or_default();
-        device.device.id = parse_hex_id(
-            device_id,
-            4,
-            &dir.join("device"),
-            "device",
-            errors,
-        )
-        .unwrap_or_default();
-        device.class.code = parse_hex_id(
-            class,
-            6,
-            &dir.join("class"),
-            "class",
-            errors,
-        )
-        .unwrap_or_default();
+        device.vendor.id =
+            parse_hex_id(vendor, 4, &dir.join("vendor"), "vendor", errors).unwrap_or_default();
+        device.device.id =
+            parse_hex_id(device_id, 4, &dir.join("device"), "device", errors).unwrap_or_default();
+        device.class.code =
+            parse_hex_id(class, 6, &dir.join("class"), "class", errors).unwrap_or_default();
         device.modalias = clean_modalias(modalias, &dir, errors);
         device.class.name = classify_pci(&device.class.code).label().to_owned();
         device.subsystem.vendor = parse_hex_id(
@@ -429,7 +399,8 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         // bDeviceClass is 0x00 (unspecified) or absent on many devices; that
         // is normal. Only an unreadable or malformed value is an error.
         let raw_class = read_optional(&dir, "bDeviceClass", sources, errors);
-        device.class.code = parse_usb_class(raw_class, &dir, "bDeviceClass", errors).unwrap_or_default();
+        device.class.code =
+            parse_usb_class(raw_class, &dir, "bDeviceClass", errors).unwrap_or_default();
         // The USB device itself is always classified as USB; a more specific
         // category is assigned to each interface using its interface class.
         device.class.name = Category::Usb.label().to_owned();
@@ -519,9 +490,7 @@ fn scan_device_tree(
     while let Some((dir, relative)) = pending.pop() {
         record_source(sources, dir.display().to_string());
         let entries = match fs::read_dir(&dir) {
-            Ok(entries) => {
-                entries
-            }
+            Ok(entries) => entries,
             Err(error) if error.kind() == ErrorKind::NotFound && relative.is_empty() => {
                 // Device Tree is legitimately unavailable on many platforms.
                 return devices;
