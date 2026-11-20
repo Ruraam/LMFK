@@ -85,6 +85,13 @@ fn accepts_a_valid_inventory() {
 }
 
 #[test]
+fn rejects_invalid_rfc3339_timestamp() {
+    let mut doc = valid_inventory();
+    doc["generated_at"] = json!("yesterday at noon");
+    assert_schema_invalid(&doc);
+}
+
+#[test]
 fn rejects_missing_required_field() {
     let mut doc = valid_inventory();
     doc.as_object_mut().unwrap().remove("schema_version");
