@@ -132,7 +132,13 @@ impl ModuleIndex {
         issues.append(&mut loaded_issues);
         let present = dependencies.keys().cloned().collect();
         (
-            Self { aliases, builtin, present, dependencies, loaded },
+            Self {
+                aliases,
+                builtin,
+                present,
+                dependencies,
+                loaded,
+            },
             issues,
         )
     }
@@ -161,30 +167,26 @@ impl ModuleIndex {
         candidates
             .into_iter()
             .map(|(name, source)| {
-            let state = if self.loaded.contains(&name) {
-                ModuleState::Loaded
-            } else if self.builtin.contains(&name) {
-                ModuleState::Builtin
-            } else if self.present.contains(&name) {
-                ModuleState::Available
-            } else if source == MatchSource::DriverLink {
-                ModuleState::Unknown
-            } else {
-                ModuleState::Missing
-            };
-            let dependencies = self
-                    .dependencies
-                    .get(&name)
-                    .cloned()
-                    .unwrap_or_default();
-            Module {
+                let state = if self.loaded.contains(&name) {
+                    ModuleState::Loaded
+                } else if self.builtin.contains(&name) {
+                    ModuleState::Builtin
+                } else if self.present.contains(&name) {
+                    ModuleState::Available
+                } else if source == MatchSource::DriverLink {
+                    ModuleState::Unknown
+                } else {
+                    ModuleState::Missing
+                };
+                let dependencies = self.dependencies.get(&name).cloned().unwrap_or_default();
+                Module {
                     name,
                     match_source: source,
                     state,
                     dependencies,
                     firmwares: Vec::new(),
                 }
-                    })
+            })
             .collect()
     }
 
@@ -282,8 +284,7 @@ fn glob_match(pattern: &str, value: &str) -> bool {
         } else {
             match p[pi] {
                 b'*' => {
-                    visit(p, v, pi + 1, vi, memo)
-                        || (vi < v.len() && visit(p, v, pi, vi + 1, memo))
+                    visit(p, v, pi + 1, vi, memo) || (vi < v.len() && visit(p, v, pi, vi + 1, memo))
                 }
                 b'?' => vi < v.len() && visit(p, v, pi + 1, vi + 1, memo),
                 b'[' => {
