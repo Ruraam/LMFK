@@ -1,4 +1,4 @@
-//! Read-only PCI/USB hardware discovery.
+//! Read-only PCI/USB/Device Tree hardware discovery.
 //!
 //! All filesystem access is `read`, `read_dir` or `read_link`. The scanner
 //! never writes, creates caches, compiles modules or invokes commands.
@@ -180,18 +180,7 @@ fn parse_usb_class(
     source: &Path,
     errors: &mut Vec<ScanError>,
 ) -> Option<String> {
-    let raw = raw?;
-    match parse_hex_id(Some(raw.clone()), 2, source, "USB class", errors) {
-        Some(value) => Some(value),
-        None => {
-            record_error(
-                errors,
-                source.display().to_string(),
-                format!("invalid USB class value: {raw}"),
-            );
-            None
-        }
-    }
+    parse_hex_id(raw, 2, source, "USB class", errors)
 }
 
 fn classify_usb_interface(code: Option<String>) -> Category {
@@ -461,12 +450,134 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
     devices
 }
 
+/// Enumerate Device Tree nodes exposed by sysfs. Only nodes with a
+/// non-empty `compatible` property are represented as hardware devices.
+/// Property files are read as bytes because Linux encodes string lists with NULs.
+fn scan_device_tree(
+    root: &Path,
+    sources: &mut Vec<String>,
+    errors: &mut Vec<ScanError>,
+) -> Vec<Device> {
+    let tree_root = root.join("firmware/devicetree/base");
+    let mut pending = vec![(tree_root.clone(), String::new())];
+    let mut devices = Vec::new();
+
+    while let Some((dir, relative)) = pending.pop() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => {
+                record_source(sources, dir.display().to_string());
+                entries
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound && relative.is_empty() => {
+                // Device Tree is legitimately unavailable on many platforms.
+                return devices;
+            }
+            Err(error) => {
+                record_error(
+                    errors,
+                    dir.display().to_string(),
+                    format!("cannot enumerate Device Tree node: {error}"),
+                );
+                continue;
+            }
+        };
+
+        let compatible_path = dir.join("compatible");
+        match fs::read(&compatible_path) {
+            Ok(bytes) => {
+                record_source(sources, compatible_path.display().to_string());
+                let compatibles: Vec<String> = bytes
+                    .split(|byte| *byte == 0)
+                    .filter(|part| !part.is_empty())
+                    .map(|part| String::from_utf8_lossy(part).trim().to_owned())
+                    .filter(|value| !value.is_empty())
+                    .collect();
+                if let Some(primary) = compatibles.first() {
+                    let id_path = if relative.is_empty() {
+                        "/".to_owned()
+                    } else {
+                        format!("/{relative}")
+                    };
+                    let id = format!("dt:{id_path}");
+                    let mut device = empty_device(id.clone(), Bus::Dt, &dir);
+                    device.class.name = Category::Other.label().to_owned();
+                    device.vendor.name = primary
+                        .split_once(',')
+                        .map(|(vendor, _)| vendor.to_owned())
+                        .unwrap_or_default();
+                    device.device.name = primary.clone();
+                    device.parent = if relative.is_empty() {
+                        None
+                    } else {
+                        let parent = Path::new(&relative).parent()
+                            .and_then(|value| value.to_str())
+                            .unwrap_or("");
+                        Some(if parent.is_empty() {
+                            "dt:/".to_owned()
+                        } else {
+                            format!("dt:/{parent}")
+                        })
+                    };
+                    devices.push(device);
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => record_error(
+                errors,
+                compatible_path.display().to_string(),
+                format!("cannot read Device Tree compatible property: {error}"),
+            ),
+        }
+
+        let mut children = Vec::new();
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    record_error(
+                        errors,
+                        dir.display().to_string(),
+                        format!("cannot read Device Tree directory entry: {error}"),
+                    );
+                    continue;
+                }
+            };
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(error) => {
+                    record_error(
+                        errors,
+                        entry.path().display().to_string(),
+                        format!("cannot inspect Device Tree entry: {error}"),
+                    );
+                    continue;
+                }
+            };
+            if file_type.is_dir() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let child_relative = if relative.is_empty() {
+                    name
+                } else {
+                    format!("{relative}/{name}")
+                };
+                children.push((entry.path(), child_relative));
+            }
+        }
+        children.sort_by(|left, right| right.1.cmp(&left.1));
+        pending.extend(children);
+    }
+
+    devices.sort_by(|left, right| left.id.cmp(&right.id));
+    devices
+}
+
 /// Scan a sysfs-like tree. The root is a parameter so tests can use fixtures.
 pub fn scan(options: &ScanOptions<'_>) -> Inventory {
     let mut sources = Vec::new();
     let mut errors = Vec::new();
     let mut devices = scan_pci(options.root, &mut sources, &mut errors);
     devices.extend(scan_usb(options.root, &mut sources, &mut errors));
+    devices.extend(scan_device_tree(options.root, &mut sources, &mut errors));
     devices.sort_by(|a, b| a.id.cmp(&b.id));
 
     // Schema v1.0 requires an explicit PACKAGE_UNKNOWN diagnosis whenever
