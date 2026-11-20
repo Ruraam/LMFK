@@ -39,8 +39,13 @@ pub fn validate_json(value: &Value) -> Result<(), Vec<String>> {
     if schema_version != Some(crate::SCHEMA_VERSION) {
         errors.push(format!("schema_version must be {}", crate::SCHEMA_VERSION));
     }
-    require(root, "generated_at", &mut errors)
-        .and_then(|v| expect_str(v, "generated_at", &mut errors));
+    if let Some(timestamp) = require(root, "generated_at", &mut errors)
+        .and_then(|value| expect_str(value, "generated_at", &mut errors))
+    {
+        if !is_rfc3339_timestamp(timestamp) {
+            errors.push("generated_at must be a valid RFC 3339 date-time".to_owned());
+        }
+    }
 
     let host =
         require(root, "host", &mut errors).and_then(|v| expect_object(v, "host", &mut errors));
@@ -484,6 +489,84 @@ fn validate_firmwares(value: &Value, path: &str, errors: &mut Vec<String>) {
         if present == Some(false) && paths.is_some_and(|paths| !paths.is_empty()) {
             errors.push(format!("{fpath}: absent firmware must have empty paths"));
         }
+    }
+}
+
+fn is_rfc3339_timestamp(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() < 20
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
+        return false;
+    }
+
+    let digits = |range: std::ops::Range<usize>| {
+        bytes
+            .get(range)
+            .is_some_and(|part| part.iter().all(u8::is_ascii_digit))
+    };
+    if !digits(0..4) || !digits(5..7) || !digits(8..10)
+        || !digits(11..13) || !digits(14..16) || !digits(17..19)
+    {
+        return false;
+    }
+
+    let number = |range: std::ops::Range<usize>| {
+        std::str::from_utf8(&bytes[range]).ok()?.parse::<u32>().ok()
+    };
+    let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
+        number(0..4),
+        number(5..7),
+        number(8..10),
+        number(11..13),
+        number(14..16),
+        number(17..19),
+    ) else {
+        return false;
+    };
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap_year => 29,
+        2 => 28,
+        _ => return false,
+    };
+    if day == 0 || day > days_in_month || hour > 23 || minute > 59 || second > 59 {
+        return false;
+    }
+
+    let mut position = 19;
+    if bytes.get(position) == Some(&b'.') {
+        position += 1;
+        let fraction_start = position;
+        while bytes.get(position).is_some_and(u8::is_ascii_digit) {
+            position += 1;
+        }
+        if position == fraction_start {
+            return false;
+        }
+    }
+
+    match bytes.get(position..) {
+        Some([b'Z']) => true,
+        Some([sign @ (b'+' | b'-'), hour_tens, hour_ones, b':', minute_tens, minute_ones]) => {
+            let offset_hour = u32::from(hour_tens - b'0') * 10 + u32::from(hour_ones - b'0');
+            let offset_minute =
+                u32::from(minute_tens - b'0') * 10 + u32::from(minute_ones - b'0');
+            (*sign == b'+' || *sign == b'-')
+                && hour_tens.is_ascii_digit()
+                && hour_ones.is_ascii_digit()
+                && minute_tens.is_ascii_digit()
+                && minute_ones.is_ascii_digit()
+                && offset_hour <= 23
+                && offset_minute <= 59
+        }
+        _ => false,
     }
 }
 
