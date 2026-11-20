@@ -305,9 +305,30 @@ fn scan_pci(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         let device_id = read_required(&dir, "device", sources, errors);
         let class = read_required(&dir, "class", sources, errors);
         let modalias = read_required(&dir, "modalias", sources, errors);
-        device.vendor.id = parse_hex_id(vendor, 4, &dir.join("vendor"), "vendor", errors).unwrap_or_default();
-        device.device.id = parse_hex_id(device_id, 4, &dir.join("device"), "device", errors).unwrap_or_default();
-        device.class.code = parse_hex_id(class, 6, &dir.join("class"), "class", errors).unwrap_or_default();
+        device.vendor.id = parse_hex_id(
+            vendor,
+            4,
+            &dir.join("vendor"),
+            "vendor",
+            errors,
+        )
+        .unwrap_or_default();
+        device.device.id = parse_hex_id(
+            device_id,
+            4,
+            &dir.join("device"),
+            "device",
+            errors,
+        )
+        .unwrap_or_default();
+        device.class.code = parse_hex_id(
+            class,
+            6,
+            &dir.join("class"),
+            "class",
+            errors,
+        )
+        .unwrap_or_default();
         device.modalias = clean_modalias(modalias, &dir, errors);
         device.class.name = classify_pci(&device.class.code).label().to_owned();
         device.subsystem.vendor = parse_hex_id(
@@ -412,10 +433,22 @@ fn scan_usb(root: &Path, sources: &mut Vec<String>, errors: &mut Vec<ScanError>)
         // The USB device itself is always classified as USB; a more specific
         // category is assigned to each interface using its interface class.
         device.class.name = Category::Usb.label().to_owned();
-        device.vendor.id =
-            parse_hex_id(read_required(&dir, "idVendor", sources, errors), 4, &dir.join("idVendor"), "idVendor", errors).unwrap_or_default();
-        device.device.id =
-            parse_hex_id(read_required(&dir, "idProduct", sources, errors), 4, &dir.join("idProduct"), "idProduct", errors).unwrap_or_default();
+        device.vendor.id = parse_hex_id(
+            read_required(&dir, "idVendor", sources, errors),
+            4,
+            &dir.join("idVendor"),
+            "idVendor",
+            errors,
+        )
+        .unwrap_or_default();
+        device.device.id = parse_hex_id(
+            read_required(&dir, "idProduct", sources, errors),
+            4,
+            &dir.join("idProduct"),
+            "idProduct",
+            errors,
+        )
+        .unwrap_or_default();
         device.modalias = clean_modalias(
             read_optional(&dir, "modalias", sources, errors),
             &dir,
